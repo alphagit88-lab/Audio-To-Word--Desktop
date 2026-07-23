@@ -1,0 +1,60 @@
+{
+  "name": "audio-to-word",
+  "version": "1.0.2",
+  "description": "Desktop app to convert audio files into formatted Microsoft Word (.docx) documents.",
+  "main": "dist/main/index.js",
+  "author": "ITX",
+  "license": "ITX",
+  "scripts": {
+    "dev:main": "npx tsc -p tsconfig.build.json -w",
+    "dev:renderer": "vite",
+    "dev": "npx tsc -p tsconfig.build.json && concurrently \"npx tsc -p tsconfig.build.json -w\" \"npx vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build:main": "npx tsc -p tsconfig.build.json",
+    "build:renderer": "npx vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "electron:pack": "electron-builder && node scripts/generate-latest-yml.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.13.0",
+    "docx": "^9.1.1",
+    "dotenv": "^16.4.7",
+    "electron-updater": "^6.8.9",
+    "lucide-react": "^0.474.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.10",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^34.0.2",
+    "electron-builder": "^25.1.8",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "com.audiotoword.app",
+    "productName": "Audio to Word",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      ".env"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "http://127.0.0.1:8000/releases"
+    }
+  }
+}
