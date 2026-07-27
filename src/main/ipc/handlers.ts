@@ -73,7 +73,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           const payload = JSON.stringify({ total_seconds: totalSeconds, file_count: filePaths.length });
           const url = new URL('/api/usage', apiUrl);
           const lib = url.protocol === 'https:' ? https : http;
-          await new Promise<void>((resolve) => {
+          await new Promise<void>((resolve, reject) => {
             const req = lib.request(url, {
               method: 'POST',
               headers: {
@@ -82,7 +82,13 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
                 'Authorization': `Bearer ${authToken}`,
                 'Content-Length': Buffer.byteLength(payload),
               }
-            }, () => resolve());
+            }, (res) => {
+              if (res.statusCode === 401 || res.statusCode === 403) {
+                reject(new Error('AUTH_ERROR'));
+              } else {
+                resolve();
+              }
+            });
             req.on('error', (err) => {
               console.warn('[usage] Failed to log usage to backend:', err.message);
               resolve(); // fail gracefully
@@ -93,6 +99,9 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           console.log(`[usage] Logged ${totalSeconds}s for ${filePaths.length} file(s)`);
         }
       } catch (usageErr: any) {
+        if (usageErr.message === 'AUTH_ERROR') {
+          return { success: false, error: 'AUTH_ERROR' };
+        }
         console.warn('[usage] Duration calc or logging failed, continuing anyway:', usageErr.message);
       }
       const particleSizeMinutes = Number(process.env.PARTICLE_SIZE_MINUTES) || 15;

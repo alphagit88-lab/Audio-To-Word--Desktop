@@ -179,6 +179,10 @@ const MainAppContent: React.FC = () => {
         if (finalResult.success) {
           break; // Succeeded! Exit retry loop
         } else {
+          if (finalResult.error === 'AUTH_ERROR') {
+            handleLogout();
+            return;
+          }
           if (finalResult.error?.includes('Network error')) {
             break;
           }
