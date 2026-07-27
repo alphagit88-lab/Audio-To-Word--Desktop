@@ -22,7 +22,7 @@ export interface ConversionResult {
 
 export interface ElectronAPI {
   selectAudioFile: (allowMultiple?: boolean) => Promise<AudioFileInfo[] | null>;
-  convertAudioToDocx: (filePaths: string[], apiKey?: string) => Promise<ConversionResult>;
+  convertAudioToDocx: (filePaths: string[], apiKey?: string, authToken?: string) => Promise<ConversionResult>;
   openFolder: (filePath: string) => Promise<void>;
   onProgress: (callback: (progress: ConversionProgress) => void) => () => void;
   startUpdateDownload: () => void;

@@ -40,14 +40,14 @@ export const translations = {
     // Options
     'options.multi_label': 'Allow multiple audio files (Up to 3)',
     'options.multi_desc': 'Merge up to 3 tracks into a single high-accuracy document',
-    'options.accuracy_label': 'Make more accurate with AI merging',
+    'options.accuracy_label': 'Make more accurate merging compared audio files',
     'options.accuracy_desc': 'Uses deep multi-pass AI comparison to eliminate background noise and garbled words',
 
     // Progress & Action
     'converter.btn_convert': 'Convert to Word (.docx)',
     'converter.btn_converting': 'Converting Audio...',
     'converter.status_reading': 'Reading audio file data...',
-    'converter.status_transcribing': 'Transcribing audio content with Gemini AI...',
+    'converter.status_transcribing': 'Transcribing audio content...',
     'converter.status_merging': 'Comparing and merging multiple audio tracks...',
     'converter.status_docx': 'Generating formatted Word document...',
     'converter.status_completed': 'Conversion completed successfully!',
@@ -137,14 +137,14 @@ export const translations = {
     // Options
     'options.multi_label': 'බහු ඔඩියෝ ගොනු (3 දක්වා) තේරීමට ඉඩ දෙන්න',
     'options.multi_desc': 'ඉහළ නිවැරදි භාවයක් සඳහා ගොනු 3 ක් එකම ලේඛනයකට එකතු කරන්න',
-    'options.accuracy_label': 'AI සම්බන්ධ කිරීම හරහා වඩාත් නිවැරදි කරන්න',
-    'options.accuracy_desc': 'පසුබිම් ශබ්ද සහ අපැහැදිලි වචන ඉවත් කිරීමට AI තාක්ෂණය භාවිතා කරයි',
+    'options.accuracy_label': 'සංසන්දනාත්මක සම්බන්ධ කිරීම හරහා වඩාත් නිවැරදි කරන්න',
+    'options.accuracy_desc': 'පසුබිම් ශබ්ද සහ අපැහැදිලි වචන ඉවත් කිරීමට සංසන්දනාත්මක සම්බන්ධ කිරීම භාවිතා කරයි',
 
     // Progress & Action
     'converter.btn_convert': 'Word (.docx) බවට පරිවර්තනය කරන්න',
     'converter.btn_converting': 'පරිවර්තනය වෙමින් පවතී...',
     'converter.status_reading': 'ඔඩියෝ ගොනුව කියවමින් පවතී...',
-    'converter.status_transcribing': 'Gemini AI මගින් හඬ පෙළට හරවමින් පවතී...',
+    'converter.status_transcribing': 'හඬ පෙළට හරවමින් පවතී...',
     'converter.status_merging': 'බහු ඔඩියෝ පටිගත කිරීම් සසඳමින් එකතු කරයි...',
     'converter.status_docx': 'Word ලේඛනය සකස් කරමින් පවතී...',
     'converter.status_completed': 'පරිවර්තනය සාර්ථකව අවසන් විය!',

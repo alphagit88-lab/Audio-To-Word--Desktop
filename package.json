@@ -1,6 +1,6 @@
 {
   "name": "audio-to-word",
-  "version": "1.0.2",
+  "version": "1.0.0",
   "description": "Desktop app to convert audio files into formatted Microsoft Word (.docx) documents.",
   "main": "dist/main/index.js",
   "author": "ITX",
@@ -15,13 +15,17 @@
     "electron:pack": "electron-builder && node scripts/generate-latest-yml.js"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@google/genai": "^2.13.0",
     "docx": "^9.1.1",
     "dotenv": "^16.4.7",
     "electron-updater": "^6.8.9",
+    "fluent-ffmpeg": "^2.1.3",
     "lucide-react": "^0.474.0"
   },
   "devDependencies": {
+    "@types/fluent-ffmpeg": "^2.1.28",
     "@types/node": "^22.10.10",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
@@ -45,6 +49,10 @@
       "dist/**/*",
       "package.json",
       ".env"
+    ],
+    "asarUnpack": [
+      "node_modules/@ffmpeg-installer/ffmpeg/**/*",
+      "node_modules/@ffprobe-installer/ffprobe/**/*"
     ],
     "win": {
       "target": [

@@ -3,8 +3,8 @@ import { ConversionProgress } from '../types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   selectAudioFile: (allowMultiple?: boolean) => ipcRenderer.invoke('select-audio-file', allowMultiple),
-  convertAudioToDocx: (filePaths: string[], apiKey?: string) =>
-    ipcRenderer.invoke('convert-audio-to-docx', filePaths, apiKey),
+  convertAudioToDocx: (filePaths: string[], apiKey?: string, authToken?: string) =>
+    ipcRenderer.invoke('convert-audio-to-docx', filePaths, apiKey, authToken),
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   onProgress: (callback: (progress: ConversionProgress) => void) => {
     const subscription = (_: any, progress: ConversionProgress) => callback(progress);

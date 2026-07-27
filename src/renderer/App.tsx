@@ -174,7 +174,7 @@ const MainAppContent: React.FC = () => {
     for (let i = 0; i < apiKeys.length; i++) {
       const activeKey = apiKeys[i];
       try {
-        finalResult = await window.electronAPI.convertAudioToDocx(filePaths, activeKey);
+        finalResult = await window.electronAPI.convertAudioToDocx(filePaths, activeKey, i === 0 ? (token ?? undefined) : undefined);
 
         if (finalResult.success) {
           break; // Succeeded! Exit retry loop
