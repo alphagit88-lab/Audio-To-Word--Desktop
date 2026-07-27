@@ -96,7 +96,13 @@ export const translations = {
     // Alerts & Common
     'common.error': 'Error',
     'common.success': 'Success',
-    'common.close': 'Close'
+    'common.close': 'Close',
+
+    // Audio Editor
+    'editor.set_start': 'Set Start',
+    'editor.set_end': 'Set End',
+    'editor.label_start': 'Start:',
+    'editor.label_end': 'End:'
   },
   si: {
     // App & Nav
@@ -193,6 +199,12 @@ export const translations = {
     // Alerts & Common
     'common.error': 'දෝෂයකි',
     'common.success': 'සාර්ථකයි',
-    'common.close': 'වසා දමන්න'
+    'common.close': 'වසා දමන්න',
+
+    // Audio Editor
+    'editor.set_start': 'ආරම්භය සකසන්න',
+    'editor.set_end': 'අවසානය සකසන්න',
+    'editor.label_start': 'ආරම්භය:',
+    'editor.label_end': 'අවසානය:'
   }
 };

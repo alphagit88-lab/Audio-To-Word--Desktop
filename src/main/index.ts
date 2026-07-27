@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain, shell, protocol, net } from 'electron';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -31,7 +31,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webSecurity: false
     }
   });
 

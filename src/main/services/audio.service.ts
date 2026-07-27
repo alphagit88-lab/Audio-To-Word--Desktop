@@ -3,6 +3,7 @@ import path from 'path';
 import ffmpeg, { FfprobeData } from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
+import { AudioFileInfo } from '../../types';
 
 // In an Electron app, unpacked binaries reside in app.asar.unpacked instead of app.asar
 const ffmpegPath = ffmpegInstaller.path.replace('app.asar', 'app.asar.unpacked');
@@ -35,37 +36,47 @@ export class AudioProcessingService {
    * Converts a given audio file to MP3 (128kbps) and saves it to a 'source' folder.
    * If it's already an MP3, it simply copies it to the 'source' folder.
    */
-  public async convertToMp3(filePath: string, onProgress?: (msg: string) => void): Promise<string> {
-    const originalDir = path.dirname(filePath);
+  public async convertToMp3(file: AudioFileInfo, onProgress?: (msg: string) => void): Promise<string> {
+    const originalDir = path.dirname(file.filePath);
     const sourceDir = path.join(originalDir, 'source');
     
     if (!fs.existsSync(sourceDir)) {
       fs.mkdirSync(sourceDir, { recursive: true });
     }
 
-    const ext = path.extname(filePath).toLowerCase();
-    const baseName = path.basename(filePath, ext);
+    const ext = path.extname(file.filePath).toLowerCase();
+    const baseName = path.basename(file.filePath, ext);
     const outputPath = path.join(sourceDir, `${baseName}.mp3`);
 
-    if (ext === '.mp3') {
+    const hasTimeLimits = Boolean(file.needsClipping);
+
+    if (ext === '.mp3' && !hasTimeLimits) {
       onProgress?.(`Copying ${baseName}.mp3 to source folder...`);
-      fs.copyFileSync(filePath, outputPath);
+      fs.copyFileSync(file.filePath, outputPath);
       return outputPath;
     }
 
-    onProgress?.(`Converting ${path.basename(filePath)} to MP3...`);
+    onProgress?.(`Converting ${path.basename(file.filePath)} to MP3${hasTimeLimits ? ' (Clipping)' : ''}...`);
 
     return new Promise((resolve, reject) => {
-      ffmpeg(filePath)
-        .toFormat('mp3')
-        .audioBitrate('128k')
+      let cmd = ffmpeg(file.filePath).toFormat('mp3').audioBitrate('128k');
+
+      if (file.startTime) {
+        cmd = cmd.setStartTime(file.startTime);
+      }
+      if (file.endTime) {
+        // Output option -to ends at this specific time in the original input
+        cmd = cmd.outputOptions(['-to', file.endTime]);
+      }
+
+      cmd
         .on('progress', (progress) => {
           if (progress.percent) {
-            onProgress?.(`Converting ${path.basename(filePath)} to MP3... (${Math.round(progress.percent)}%)`);
+            onProgress?.(`Converting ${path.basename(file.filePath)} to MP3... (${Math.round(progress.percent)}%)`);
           }
         })
         .on('error', (err: Error) => {
-          console.error(`[AudioService] Error converting ${filePath}:`, err);
+          console.error(`[AudioService] Error converting ${file.filePath}:`, err);
           reject(err);
         })
         .on('end', () => {

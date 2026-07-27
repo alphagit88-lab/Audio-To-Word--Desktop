@@ -3,6 +3,9 @@ export interface AudioFileInfo {
   fileName: string;
   fileSize: number;
   extension: string;
+  startTime?: string;
+  endTime?: string;
+  needsClipping?: boolean;
 }
 
 export type ConversionStatus = 'idle' | 'reading_file' | 'transcribing' | 'generating_docx' | 'completed' | 'error';
@@ -22,7 +25,7 @@ export interface ConversionResult {
 
 export interface ElectronAPI {
   selectAudioFile: (allowMultiple?: boolean) => Promise<AudioFileInfo[] | null>;
-  convertAudioToDocx: (filePaths: string[], apiKey?: string, authToken?: string) => Promise<ConversionResult>;
+  convertAudioToDocx: (files: AudioFileInfo[], apiKey?: string, authToken?: string) => Promise<ConversionResult>;
   openFolder: (filePath: string) => Promise<void>;
   onProgress: (callback: (progress: ConversionProgress) => void) => () => void;
   startUpdateDownload: () => void;

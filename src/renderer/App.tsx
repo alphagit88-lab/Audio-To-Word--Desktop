@@ -5,7 +5,7 @@ import { ConversionStatusCard } from './components/ConversionStatusCard';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
 import { AudioFileInfo, ConversionProgress, ConversionResult } from '../types';
-import { LogOut, FileAudio, Users } from 'lucide-react';
+import { LogOut, FileAudio, Users, DownloadCloud, RefreshCw } from 'lucide-react';
 import { LanguageProvider, useTranslation } from './context/LanguageContext';
 
 interface AuthUser {
@@ -38,6 +38,38 @@ const MainAppContent: React.FC = () => {
   const [conversionResult, setConversionResult] = useState<ConversionResult | null>(null);
 
   const baseUrl = import.meta.env.VITE_API_URL;
+
+  // ── Update States (forced update before use) ────────────────────────────────
+  const [updateState, setUpdateState] = useState<'idle'|'available'|'downloading'|'ready'>('idle');
+  const [updateVersion, setUpdateVersion] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onUpdateAvailable) return;
+    const unsubs = [
+      window.electronAPI.onUpdateAvailable((version) => {
+        setUpdateVersion(version);
+        setUpdateState('available');
+      }),
+      window.electronAPI.onUpdateDownloaded(() => {
+        setUpdateState('ready');
+      }),
+      window.electronAPI.onUpdateProgress((percent) => {
+        setDownloadProgress(percent);
+      })
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, []);
+
+  const handleUpdateAction = () => {
+    if (updateState === 'available') {
+      setUpdateState('downloading');
+      window.electronAPI.startUpdateDownload();
+    } else if (updateState === 'ready') {
+      window.electronAPI.runDownloadedUpdate();
+    }
+  };
+  // ────────────────────────────────────────────────────────────────────────────
 
   // Fetch API keys pool from backend
   const fetchApiKeys = async (authToken: string) => {
@@ -139,6 +171,13 @@ const MainAppContent: React.FC = () => {
     }
   };
 
+  const handleUpdateFileConfig = (index: number, updates: Partial<AudioFileInfo>) => {
+    if (!selectedFiles) return;
+    const newFiles = [...selectedFiles];
+    newFiles[index] = { ...newFiles[index], ...updates };
+    setSelectedFiles(newFiles);
+  };
+
   const handleSelectFile = async () => {
     try {
       const filesInfo = await window.electronAPI.selectAudioFile(allowMultiple);
@@ -167,14 +206,14 @@ const MainAppContent: React.FC = () => {
       return;
     }
 
-    const filePaths = selectedFiles.map((f) => f.filePath);
+    const files = selectedFiles;
     let finalResult: ConversionResult | null = null;
 
     // Sequential loop over the pool of keys
     for (let i = 0; i < apiKeys.length; i++) {
       const activeKey = apiKeys[i];
       try {
-        finalResult = await window.electronAPI.convertAudioToDocx(filePaths, activeKey, i === 0 ? (token ?? undefined) : undefined);
+        finalResult = await window.electronAPI.convertAudioToDocx(files, activeKey, i === 0 ? (token ?? undefined) : undefined);
 
         if (finalResult.success) {
           break; // Succeeded! Exit retry loop
@@ -211,6 +250,64 @@ const MainAppContent: React.FC = () => {
   };
 
   const isConverting = progress.status !== 'idle' && progress.status !== 'completed' && progress.status !== 'error';
+
+  // Force Update Screen — blocks everything until user installs the update
+  if (updateState !== 'idle') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw' }}>
+        <Header />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '1.5rem',
+          padding: '2rem',
+          background: 'var(--bg-gradient)'
+        }}>
+          <div style={{ background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: '50%', padding: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <DownloadCloud size={48} color="#fbbf24" />
+          </div>
+          <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.5rem' }}>
+              Update Required — v{updateVersion}
+            </h2>
+            <p style={{ fontSize: '0.9rem', color: '#94a3b8', lineHeight: 1.6 }}>
+              A new version of the application is available. You must install this update before continuing.
+            </p>
+          </div>
+
+          {updateState === 'available' && (
+            <button
+              onClick={handleUpdateAction}
+              style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', color: '#fff', padding: '0.75rem 2rem', borderRadius: '10px', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <DownloadCloud size={18} /> Download &amp; Install Update
+            </button>
+          )}
+
+          {updateState === 'downloading' && (
+            <div style={{ width: '100%', maxWidth: '360px', display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
+              <div style={{ width: '100%', background: 'rgba(255,255,255,0.1)', borderRadius: '999px', height: '10px', overflow: 'hidden' }}>
+                <div style={{ width: `${downloadProgress}%`, height: '100%', background: 'linear-gradient(90deg, #6366f1, #8b5cf6)', borderRadius: '999px', transition: 'width 0.3s ease' }} />
+              </div>
+              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Downloading... {Math.round(downloadProgress)}%</span>
+            </div>
+          )}
+
+          {updateState === 'ready' && (
+            <button
+              onClick={handleUpdateAction}
+              style={{ background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', color: '#fff', padding: '0.75rem 2rem', borderRadius: '10px', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <RefreshCw size={18} /> Restart &amp; Install Now
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // Splash Loading Screen
   if (isLoadingAuth) {
@@ -330,6 +427,7 @@ const MainAppContent: React.FC = () => {
                 onConvert={handleConvert}
                 allowMultiple={allowMultiple}
                 setAllowMultiple={setAllowMultiple}
+                onUpdateFileConfig={handleUpdateFileConfig}
               />
 
               {(progress.status !== 'idle' || conversionResult) && (

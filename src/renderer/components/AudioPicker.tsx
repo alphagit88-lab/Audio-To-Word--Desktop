@@ -2,6 +2,7 @@ import React from 'react';
 import { UploadCloud, FileAudio, ArrowRight } from 'lucide-react';
 import { AudioFileInfo } from '../../types';
 import { useTranslation } from '../context/LanguageContext';
+import { AudioEditor } from './AudioEditor';
 
 interface AudioPickerProps {
   selectedFiles: AudioFileInfo[] | null;
@@ -10,6 +11,7 @@ interface AudioPickerProps {
   onConvert: () => void;
   allowMultiple: boolean;
   setAllowMultiple: (val: boolean) => void;
+  onUpdateFileConfig: (index: number, updates: Partial<AudioFileInfo>) => void;
 }
 
 export const AudioPicker: React.FC<AudioPickerProps> = ({
@@ -18,7 +20,8 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
   isConverting,
   onConvert,
   allowMultiple,
-  setAllowMultiple
+  setAllowMultiple,
+  onUpdateFileConfig
 }) => {
   const { t } = useTranslation();
 
@@ -101,6 +104,7 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
               {selectedFiles.map((file, idx) => (
                 <div 
                   key={idx}
+                  onClick={(e) => e.stopPropagation()}
                   style={{ 
                     display: 'flex', 
                     justifyContent: 'space-between', 
@@ -109,15 +113,25 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
                     border: '1px solid rgba(255, 255, 255, 0.05)', 
                     padding: '0.5rem 0.85rem', 
                     borderRadius: '8px',
-                    textAlign: 'left'
+                    textAlign: 'left',
+                    cursor: 'default'
                   }}
                 >
-                  <span style={{ fontSize: '0.85rem', color: '#f8fafc', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}>
-                    {file.fileName}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.05)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
-                    {formatFileSize(file.fileSize)}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '100%' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.85rem', color: '#f8fafc', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}>
+                        {file.fileName}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.05)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                        {formatFileSize(file.fileSize)}
+                      </span>
+                    </div>
+                    <AudioEditor 
+                      file={file} 
+                      onUpdate={(updates) => onUpdateFileConfig(idx, updates)} 
+                      disabled={isConverting}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

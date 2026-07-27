@@ -98,16 +98,19 @@ export class GeminiTranscriptionService {
     const rawMsg = `${error?.message || error?.toString() || ''} ${causeMsg}`;
 
     if (rawMsg.includes('429') || rawMsg.includes('RESOURCE_EXHAUSTED') || rawMsg.includes('Quota exceeded') || rawMsg.toLowerCase().includes('quota')) {
-      return 'Free tier quota exceeded. Please wait a minute before trying again or use a different API key.';
+      return 'Quota exceeded. Please wait a minute before trying again.';
     }
     if (rawMsg.includes('API_KEY_INVALID') || rawMsg.includes('403') || rawMsg.includes('UNAUTHENTICATED') || rawMsg.includes('API key not valid')) {
-      return 'Invalid or expired API key. Please check the API key configuration.';
+      return 'Invalid configuration. Please wait for fixing.';
     }
     if (rawMsg.includes('400') || rawMsg.includes('INVALID_ARGUMENT')) {
       return 'The selected audio format or file size is not supported.';
     }
     if (rawMsg.includes('FETCH_ERROR') || rawMsg.includes('fetch failed') || rawMsg.includes('ENOTFOUND') || rawMsg.includes('ECONNREFUSED') || rawMsg.includes('ETIMEDOUT')) {
-      return 'Network error: Cannot reach Google Gemini servers (generativelanguage.googleapis.com). Please check your internet connection or DNS settings.';
+      return 'Network error: Cannot reach servers. Please check your internet connection or try again later.';
+    }
+    if (rawMsg.includes('503') || rawMsg.toLowerCase().includes('high demand') || rawMsg.toLowerCase().includes('overloaded') || rawMsg.toLowerCase().includes('service unavailable')) {
+      return 'Servers are currently experiencing high demand. Please try again in a few moments.';
     }
 
     return rawMsg.length > 150 ? rawMsg.substring(0, 150) + '...' : rawMsg;

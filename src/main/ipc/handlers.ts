@@ -8,6 +8,14 @@ import { DocxGeneratorService } from '../services/docx.service';
 import { AudioProcessingService } from '../services/audio.service';
 import { ConversionResult, AudioFileInfo } from '../../types';
 
+function timeToSeconds(timeStr?: string): number {
+  if (!timeStr) return 0;
+  const parts = timeStr.split(':').map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
+
 export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   const geminiService = new GeminiTranscriptionService();
   const docxService = new DocxGeneratorService();
@@ -45,10 +53,10 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     });
   });
 
-  // Handle Audio to Docx Conversion pipeline (accepts multiple file paths and optional runtime apiKey)
-  ipcMain.handle('convert-audio-to-docx', async (_, filePaths: string[], apiKey?: string, authToken?: string): Promise<ConversionResult> => {
+  // Handle Audio to Docx Conversion pipeline (accepts multiple file objects and optional runtime apiKey)
+  ipcMain.handle('convert-audio-to-docx', async (_, files: AudioFileInfo[], apiKey?: string, authToken?: string): Promise<ConversionResult> => {
     try {
-      if (!filePaths || filePaths.length === 0) {
+      if (!files || files.length === 0) {
         throw new Error('No audio files selected.');
       }
 
@@ -63,14 +71,30 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       // Calculate total audio duration across all selected files and log to backend
       let totalSeconds = 0;
       try {
-        for (const filePath of filePaths) {
-          const dur = await audioService.getAudioDuration(filePath);
+        for (const file of files) {
+          let dur = await audioService.getAudioDuration(file.filePath);
+          
+          if (file.startTime || file.endTime) {
+            const startSec = file.startTime ? timeToSeconds(file.startTime) : 0;
+            const endSec = file.endTime ? timeToSeconds(file.endTime) : dur;
+            let clippedDur = endSec - startSec;
+            if (clippedDur < 0) clippedDur = 0;
+            if (clippedDur > dur) clippedDur = dur;
+            dur = clippedDur;
+
+            if (startSec > 1 || endSec < (await audioService.getAudioDuration(file.filePath)) - 1) {
+              file.needsClipping = true;
+            } else {
+              file.needsClipping = false;
+            }
+          }
+          
           totalSeconds += Math.round(dur);
         }
 
         if (authToken) {
           const apiUrl = process.env.VITE_API_URL || 'http://localhost:8000';
-          const payload = JSON.stringify({ total_seconds: totalSeconds, file_count: filePaths.length });
+          const payload = JSON.stringify({ total_seconds: totalSeconds, file_count: files.length });
           const url = new URL('/api/usage', apiUrl);
           const lib = url.protocol === 'https:' ? https : http;
           await new Promise<void>((resolve, reject) => {
@@ -96,7 +120,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
             req.write(payload);
             req.end();
           });
-          console.log(`[usage] Logged ${totalSeconds}s for ${filePaths.length} file(s)`);
+          console.log(`[usage] Logged ${totalSeconds}s for ${files.length} file(s)`);
         }
       } catch (usageErr: any) {
         if (usageErr.message === 'AUTH_ERROR') {
@@ -107,8 +131,8 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       const particleSizeMinutes = Number(process.env.PARTICLE_SIZE_MINUTES) || 15;
 
       let needsPreprocessing = false;
-      for (const filePath of filePaths) {
-        if (path.extname(filePath).toLowerCase() !== '.mp3') {
+      for (const file of files) {
+        if (path.extname(file.filePath).toLowerCase() !== '.mp3' || file.needsClipping) {
           needsPreprocessing = true;
           break;
         }
@@ -122,18 +146,18 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
       if (!needsPreprocessing) {
         // Skip MP3 conversion and splitting entirely, use original files directly
-        allChunks = filePaths.map(f => [f]);
+        allChunks = files.map(f => [f.filePath]);
         maxChunks = 1;
       } else {
         // 1. Convert all files to MP3
         const mp3Paths: string[] = [];
-        for (let i = 0; i < filePaths.length; i++) {
+        for (let i = 0; i < files.length; i++) {
           mainWindow.webContents.send('conversion-progress', {
             status: 'reading_file',
-            message: `Converting file ${i + 1} of ${filePaths.length} to MP3...`,
+            message: `Converting file ${i + 1} of ${files.length} to MP3...`,
             percentage: 10
           });
-          const mp3Path = await audioService.convertToMp3(filePaths[i], (msg) => {
+          const mp3Path = await audioService.convertToMp3(files[i], (msg) => {
             mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 10 });
           });
           mp3Paths.push(mp3Path);
@@ -201,7 +225,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       });
 
       // Use the first original file path to determine output directory and format
-      const docxPath = await docxService.generateDocx(filePaths[0], fullTranscription);
+      const docxPath = await docxService.generateDocx(files[0].filePath, fullTranscription);
 
       mainWindow.webContents.send('conversion-progress', {
         status: 'completed',

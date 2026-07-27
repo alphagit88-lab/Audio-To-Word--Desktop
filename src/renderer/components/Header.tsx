@@ -1,43 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Sparkles, FileAudio, Globe, DownloadCloud } from 'lucide-react';
+import React from 'react';
+import { Sparkles, FileAudio, Globe } from 'lucide-react';
 import { useTranslation } from '../context/LanguageContext';
 
 export const Header: React.FC = () => {
   const { language, setLanguage, t } = useTranslation();
   
-  const [updateState, setUpdateState] = useState<'idle'|'available'|'downloading'|'ready'>('idle');
-  const [updateVersion, setUpdateVersion] = useState('');
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadedPath, setDownloadedPath] = useState('');
-
-  useEffect(() => {
-    if (!window.electronAPI?.onUpdateAvailable) return;
-
-    const unsubs = [
-      window.electronAPI.onUpdateAvailable((version) => {
-        setUpdateVersion(version);
-        setUpdateState('available');
-      }),
-      window.electronAPI.onUpdateDownloaded((filePath) => {
-        setDownloadedPath(filePath);
-        setUpdateState('ready');
-      }),
-      window.electronAPI.onUpdateProgress((percent) => {
-        setDownloadProgress(percent);
-      })
-    ];
-    return () => unsubs.forEach((unsub) => unsub());
-  }, []);
-
-  const handleUpdateAction = () => {
-    if (updateState === 'available') {
-      setUpdateState('downloading');
-      window.electronAPI.startUpdateDownload();
-    } else if (updateState === 'ready') {
-      // Launch the downloaded portable exe; it will replace the current app after exit
-      window.electronAPI.runDownloadedUpdate();
-    }
-  };
   return (
     <header style={{ padding: '1.25rem 2rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -62,34 +29,7 @@ export const Header: React.FC = () => {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
         
-        {updateState !== 'idle' && (
-          <button
-            onClick={handleUpdateAction}
-            disabled={updateState === 'downloading'}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              background: updateState === 'ready' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-              color: '#ffffff',
-              border: 'none',
-              padding: '0.4rem 0.8rem',
-              borderRadius: '20px',
-              fontSize: '0.75rem',
-              fontWeight: 600,
-              cursor: updateState === 'downloading' ? 'wait' : 'pointer',
-              transition: 'all 0.2s',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-            }}
-          >
-            <DownloadCloud size={14} />
-            {updateState === 'available' && `Update v${updateVersion} Available`}
-            {updateState === 'downloading' && `Downloading... ${Math.round(downloadProgress)}%`}
-            {updateState === 'ready' && `Restart to Install`}
-          </button>
-        )}
-
-        {/* Language Switcher Pill */}
+{/* Language Switcher Pill */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
