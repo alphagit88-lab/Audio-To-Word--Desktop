@@ -4,9 +4,16 @@ import { AudioPicker } from './components/AudioPicker';
 import { ConversionStatusCard } from './components/ConversionStatusCard';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
-import { AudioFileInfo, ConversionProgress, ConversionResult } from '../types';
-import { LogOut, FileAudio, Users, DownloadCloud, RefreshCw } from 'lucide-react';
+import { AudioFileInfo, ConversionProgress, ConversionResult, ConversionResumeState } from '../types';
+import { LogOut, FileAudio, Users, DownloadCloud, RefreshCw, Clock, File, BarChart3 } from 'lucide-react';
 import { LanguageProvider, useTranslation } from './context/LanguageContext';
+import { PartialConversionDialog } from './components/PartialConversionDialog';
+
+interface UsageStats {
+  total_seconds: number;
+  total_files: number;
+  total_conversions: number;
+}
 
 interface AuthUser {
   id: number;
@@ -26,6 +33,9 @@ const MainAppContent: React.FC = () => {
   // API Key Pool states
   const [apiKeys, setApiKeys] = useState<string[]>([]);
 
+  // Usage stats
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
+
   // App core states
   const [activeTab, setActiveTab] = useState<'converter' | 'users'>('converter');
   const [selectedFiles, setSelectedFiles] = useState<AudioFileInfo[] | null>(null);
@@ -36,11 +46,13 @@ const MainAppContent: React.FC = () => {
     percentage: 0
   });
   const [conversionResult, setConversionResult] = useState<ConversionResult | null>(null);
+  const [resumeState, setResumeState] = useState<ConversionResumeState | null>(null);
+  const [showPartialDialog, setShowPartialDialog] = useState(false);
 
   const baseUrl = import.meta.env.VITE_API_URL;
 
   // ── Update States (forced update before use) ────────────────────────────────
-  const [updateState, setUpdateState] = useState<'idle'|'available'|'downloading'|'ready'>('idle');
+  const [updateState, setUpdateState] = useState<'idle' | 'available' | 'downloading' | 'ready'>('idle');
   const [updateVersion, setUpdateVersion] = useState('');
   const [downloadProgress, setDownloadProgress] = useState(0);
 
@@ -85,7 +97,24 @@ const MainAppContent: React.FC = () => {
         setApiKeys(data.keys);
       }
     } catch (err) {
-      console.error('Failed to fetch Gemini API keys pool:', err);
+      console.error('Failed to fetch service keys:', err);
+    }
+  };
+
+  const fetchUsageSummary = async (authToken: string) => {
+    try {
+      const response = await fetch(`${baseUrl}/api/usage/summary`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Accept': 'application/json'
+        }
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setUsageStats(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch usage summary:', err);
     }
   };
 
@@ -111,6 +140,7 @@ const MainAppContent: React.FC = () => {
           setToken(storedToken);
           setUser(data.user);
           fetchApiKeys(storedToken);
+          fetchUsageSummary(storedToken);
         } else {
           localStorage.removeItem('auth_token');
         }
@@ -146,6 +176,7 @@ const MainAppContent: React.FC = () => {
     setUser(loggedInUser);
     setActiveTab('converter');
     fetchApiKeys(newToken);
+    fetchUsageSummary(newToken);
   };
 
   const handleLogout = async () => {
@@ -166,6 +197,7 @@ const MainAppContent: React.FC = () => {
       setUser(null);
       setSelectedFiles(null);
       setApiKeys([]);
+      setUsageStats(null);
       setConversionResult(null);
       setProgress({ status: 'idle', message: '', percentage: 0 });
     }
@@ -191,52 +223,69 @@ const MainAppContent: React.FC = () => {
     }
   };
 
-  const handleConvert = async () => {
-    if (!selectedFiles || selectedFiles.length === 0) return;
+  const runConversion = async (resume?: ConversionResumeState) => {
+    const files = resume?.files ?? selectedFiles;
+    if (!files || files.length === 0) return;
 
     setConversionResult(null);
+    setShowPartialDialog(false);
     setProgress({ status: 'reading_file', message: t('converter.status_reading'), percentage: 10 });
 
     if (apiKeys.length === 0) {
       setConversionResult({
         success: false,
-        error: 'No Gemini API keys configured on backend.'
+        error: 'No service keys configured on backend.'
       });
-      setProgress({ status: 'error', message: 'No API keys configured.', percentage: 0 });
+      setProgress({ status: 'error', message: 'No service keys configured.', percentage: 0 });
       return;
     }
 
-    const files = selectedFiles;
-    let finalResult: ConversionResult | null = null;
+    try {
+      const result = await window.electronAPI.convertAudioToDocx(
+        files,
+        apiKeys,
+        resume ? undefined : (token ?? undefined),
+        resume
+      );
 
-    // Sequential loop over the pool of keys
-    for (let i = 0; i < apiKeys.length; i++) {
-      const activeKey = apiKeys[i];
-      try {
-        finalResult = await window.electronAPI.convertAudioToDocx(files, activeKey, i === 0 ? (token ?? undefined) : undefined);
-
-        if (finalResult.success) {
-          break; // Succeeded! Exit retry loop
-        } else {
-          if (finalResult.error === 'AUTH_ERROR') {
-            handleLogout();
-            return;
-          }
-          if (finalResult.error?.includes('Network error')) {
-            break;
-          }
-        }
-      } catch (err: any) {
-        finalResult = {
-          success: false,
-          error: err.message || 'Communication error.'
-        };
+      if (result.error === 'AUTH_ERROR') {
+        handleLogout();
+        return;
       }
+
+      setConversionResult(result);
+
+      if (result.partial && result.resumeState) {
+        setResumeState(result.resumeState);
+        setShowPartialDialog(true);
+      } else {
+        setResumeState(null);
+        setShowPartialDialog(false);
+      }
+    } catch (err: any) {
+      setConversionResult({
+        success: false,
+        error: err.message || 'Communication error.'
+      });
     }
 
-    if (finalResult) {
-      setConversionResult(finalResult);
+    if (token) {
+      fetchUsageSummary(token);
     }
+  };
+
+  const handleConvert = () => runConversion(undefined);
+
+  const handleResumeConversion = () => {
+    if (resumeState) {
+      runConversion(resumeState);
+    }
+  };
+
+  const handleRestartConversion = () => {
+    setResumeState(null);
+    setShowPartialDialog(false);
+    runConversion(undefined);
   };
 
   const handleOpenFolder = (filePath: string) => {
@@ -246,6 +295,8 @@ const MainAppContent: React.FC = () => {
   const handleReset = () => {
     setSelectedFiles(null);
     setConversionResult(null);
+    setResumeState(null);
+    setShowPartialDialog(false);
     setProgress({ status: 'idle', message: '', percentage: 0 });
   };
 
@@ -335,6 +386,17 @@ const MainAppContent: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       <Header />
 
+      {showPartialDialog && conversionResult?.partial && conversionResult.completedChunks !== undefined && conversionResult.totalChunks !== undefined && (
+        <PartialConversionDialog
+          completedChunks={conversionResult.completedChunks}
+          totalChunks={conversionResult.totalChunks}
+          docxPath={conversionResult.docxPath}
+          onResume={handleResumeConversion}
+          onRestart={handleRestartConversion}
+          onOpenFolder={handleOpenFolder}
+        />
+      )}
+
       {/* Navigation Sub-bar */}
       <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '0.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -390,6 +452,16 @@ const MainAppContent: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {usageStats && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: '8px', padding: '0.3rem 0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#94a3b8' }}>
+                <span style={{ color: '#64748b', fontWeight: 500 }}><Clock size={10} color="#818cf8" /> Usage:</span>
+                <span style={{ fontWeight: 500, color: '#e2e8f0' }}>
+                  {Math.floor(usageStats.total_seconds / 3600)} h & {Number(((usageStats.total_seconds % 3600) / 60).toFixed(2))} mins
+                </span>
+              </div>
+            </div>
+          )}
           <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
             {t('nav.user')}: <strong style={{ color: '#cbd5e1' }}>{user.email}</strong>
             {user.role === 'admin' && <span style={{ marginLeft: '0.4rem', padding: '0.1rem 0.4rem', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', fontWeight: 600, fontSize: '0.7rem' }}>{t('nav.admin')}</span>}

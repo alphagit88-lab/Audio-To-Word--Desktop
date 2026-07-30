@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
+import { cleanTranscriptionText } from './transcription.util';
 
 export class GeminiTranscriptionService {
 
@@ -51,21 +52,24 @@ export class GeminiTranscriptionService {
     }
 
     // Add prompt instructions depending on single or multiple files
+    const noTimestampRules =
+      'Output ONLY the spoken words as plain text paragraphs. Do NOT include timestamps, time codes, time ranges, chapter markers, or speaker labels. Do not add intro/outro commentary or metadata.';
+
     if (filePaths.length === 1) {
       parts.push({
-        text: 'Please transcribe this audio accurately. Format the transcription neatly into structured paragraphs. Do not add intro/outro commentary, only return the transcribed audio text content.'
+        text: `Transcribe this audio accurately into structured paragraphs. ${noTimestampRules}`
       });
     } else {
       parts.push({
-        text: `You are an expert audio transcription engine. You have been given ${filePaths.length} separate audio recordings of the exact same voice event recorded from different microphones/devices. Listen to all audio tracks simultaneously, cross-reference them to eliminate background noise, static, or garbled words, and generate a single, highly accurate, fully coherent final transcription. Format it neatly into structured paragraphs. Do not add intro/outro commentary, only return the transcribed text content.`
+        text: `You have ${filePaths.length} recordings of the same voice event from different devices. Cross-reference them to produce one accurate transcription. ${noTimestampRules}`
       });
     }
 
-    onProgress?.('Sending audio to Gemini AI in 1 request...');
+    onProgress?.('Processing audio segment...');
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.5-flash-lite',
         contents: [
           {
             role: 'user',
@@ -83,7 +87,7 @@ export class GeminiTranscriptionService {
       console.log('[Gemini Response] : ', response);
       console.log('==========================================\n');
 
-      return transcription;
+      return cleanTranscriptionText(transcription);
     } catch (error: any) {
       console.error('\n[Gemini Response] ERROR:', error);
       throw new Error(this.formatErrorMessage(error));

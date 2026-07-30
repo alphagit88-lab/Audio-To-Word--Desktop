@@ -8,6 +8,13 @@ export interface AudioFileInfo {
   needsClipping?: boolean;
 }
 
+export interface ConversionResumeState {
+  startFromChunkIndex: number;
+  existingTranscription: string;
+  allChunks: string[][];
+  files: AudioFileInfo[];
+}
+
 export type ConversionStatus = 'idle' | 'reading_file' | 'transcribing' | 'generating_docx' | 'completed' | 'error';
 
 export interface ConversionProgress {
@@ -18,14 +25,23 @@ export interface ConversionProgress {
 
 export interface ConversionResult {
   success: boolean;
+  partial?: boolean;
   docxPath?: string;
   error?: string;
   transcription?: string;
+  completedChunks?: number;
+  totalChunks?: number;
+  resumeState?: ConversionResumeState;
 }
 
 export interface ElectronAPI {
   selectAudioFile: (allowMultiple?: boolean) => Promise<AudioFileInfo[] | null>;
-  convertAudioToDocx: (files: AudioFileInfo[], apiKey?: string, authToken?: string) => Promise<ConversionResult>;
+  convertAudioToDocx: (
+    files: AudioFileInfo[],
+    apiKeys: string[],
+    authToken?: string,
+    resumeState?: ConversionResumeState
+  ) => Promise<ConversionResult>;
   openFolder: (filePath: string) => Promise<void>;
   onProgress: (callback: (progress: ConversionProgress) => void) => () => void;
   startUpdateDownload: () => void;

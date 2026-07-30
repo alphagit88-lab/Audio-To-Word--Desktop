@@ -4,7 +4,7 @@ import { Language, translations } from '../i18n/translations';
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: string, defaultText?: string) => string;
+  t: (key: string, params?: Record<string, string | number>, defaultText?: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -20,14 +20,24 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
     localStorage.setItem('app_language', lang);
   };
 
-  const t = (key: string, defaultText?: string): string => {
+  const t = (key: string, params?: Record<string, string | number>, defaultText?: string): string => {
     const langDict = translations[language] || translations['en'];
-    const text = (langDict as Record<string, string>)[key];
-    if (text) return text;
+    let text = (langDict as Record<string, string>)[key];
 
-    // Fallback to English if translation key missing in target language
-    const fallbackText = (translations['en'] as Record<string, string>)[key];
-    return fallbackText || defaultText || key;
+    if (!text) {
+      text = (translations['en'] as Record<string, string>)[key];
+    }
+    if (!text) {
+      text = defaultText || key;
+    }
+
+    if (params) {
+      for (const [paramKey, value] of Object.entries(params)) {
+        text = text.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(value));
+      }
+    }
+
+    return text;
   };
 
   return (

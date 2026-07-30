@@ -6,7 +6,7 @@ import https from 'https';
 import { GeminiTranscriptionService } from '../services/gemini.service';
 import { DocxGeneratorService } from '../services/docx.service';
 import { AudioProcessingService } from '../services/audio.service';
-import { ConversionResult, AudioFileInfo } from '../../types';
+import { ConversionResult, AudioFileInfo, ConversionResumeState } from '../../types';
 
 function timeToSeconds(timeStr?: string): number {
   if (!timeStr) return 0;
@@ -16,13 +16,118 @@ function timeToSeconds(timeStr?: string): number {
   return parts[0] || 0;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function transcribeChunkWithRetry(
+  batch: string[],
+  apiKeys: string[],
+  geminiService: GeminiTranscriptionService
+): Promise<string> {
+  if (apiKeys.length === 0) {
+    throw new Error('No service keys configured.');
+  }
+
+  let lastError: Error | null = null;
+
+  for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex++) {
+    const apiKey = apiKeys[keyIndex];
+    try {
+      return await geminiService.transcribeAudioFiles(batch, apiKey);
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(err?.message || 'Transcription failed.');
+      if (keyIndex < apiKeys.length - 1) {
+        await delay(1500);
+      }
+    }
+  }
+
+  throw lastError || new Error('Transcription failed.');
+}
+
+async function prepareAudioChunks(
+  files: AudioFileInfo[],
+  audioService: AudioProcessingService,
+  mainWindow: BrowserWindow,
+  particleSizeMinutes: number
+): Promise<{ allChunks: string[][]; maxChunks: number }> {
+  let totalSeconds = 0;
+  for (const file of files) {
+    let dur = await audioService.getAudioDuration(file.filePath);
+
+    if (file.startTime || file.endTime) {
+      const startSec = file.startTime ? timeToSeconds(file.startTime) : 0;
+      const endSec = file.endTime ? timeToSeconds(file.endTime) : dur;
+      let clippedDur = endSec - startSec;
+      if (clippedDur < 0) clippedDur = 0;
+      if (clippedDur > dur) clippedDur = dur;
+      dur = clippedDur;
+
+      const fullDur = await audioService.getAudioDuration(file.filePath);
+      file.needsClipping = startSec > 1 || endSec < fullDur - 1;
+    }
+
+    totalSeconds += Math.round(dur);
+  }
+
+  let needsPreprocessing = false;
+  for (const file of files) {
+    if (path.extname(file.filePath).toLowerCase() !== '.mp3' || file.needsClipping) {
+      needsPreprocessing = true;
+      break;
+    }
+  }
+  if (totalSeconds > particleSizeMinutes * 60) {
+    needsPreprocessing = true;
+  }
+
+  const allChunks: string[][] = [];
+  let maxChunks = 0;
+
+  if (!needsPreprocessing) {
+    allChunks.push(...files.map((f) => [f.filePath]));
+    maxChunks = 1;
+    return { allChunks, maxChunks };
+  }
+
+  const mp3Paths: string[] = [];
+  for (let i = 0; i < files.length; i++) {
+    mainWindow.webContents.send('conversion-progress', {
+      status: 'reading_file',
+      message: `Preparing file ${i + 1} of ${files.length}...`,
+      percentage: 10
+    });
+    const mp3Path = await audioService.convertToMp3(files[i], (msg) => {
+      mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 10 });
+    });
+    mp3Paths.push(mp3Path);
+  }
+
+  for (let i = 0; i < mp3Paths.length; i++) {
+    mainWindow.webContents.send('conversion-progress', {
+      status: 'reading_file',
+      message: `Splitting file ${i + 1} of ${mp3Paths.length} into segments...`,
+      percentage: 20
+    });
+    const chunks = await audioService.splitIntoChunks(mp3Paths[i], particleSizeMinutes, (msg) => {
+      mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 20 });
+    });
+    allChunks.push(chunks);
+    if (chunks.length > maxChunks) {
+      maxChunks = chunks.length;
+    }
+  }
+
+  return { allChunks, maxChunks };
+}
+
 export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   const geminiService = new GeminiTranscriptionService();
   const docxService = new DocxGeneratorService();
 
-  // Handle Audio File Browser Dialog
   ipcMain.handle('select-audio-file', async (_, allowMultiple: boolean = false): Promise<AudioFileInfo[] | null> => {
-    const properties: any[] = ['openFile'];
+    const properties: ('openFile' | 'multiSelections')[] = ['openFile'];
     if (allowMultiple) {
       properties.push('multiSelections');
     }
@@ -39,7 +144,6 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       return null;
     }
 
-    // Limit to max 3 files as requested
     const pathsToProcess = allowMultiple ? result.filePaths.slice(0, 3) : [result.filePaths[0]];
 
     return pathsToProcess.map((filePath) => {
@@ -53,206 +157,197 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
     });
   });
 
-  // Handle Audio to Docx Conversion pipeline (accepts multiple file objects and optional runtime apiKey)
-  ipcMain.handle('convert-audio-to-docx', async (_, files: AudioFileInfo[], apiKey?: string, authToken?: string): Promise<ConversionResult> => {
-    try {
-      if (!files || files.length === 0) {
-        throw new Error('No audio files selected.');
-      }
+  ipcMain.handle(
+    'convert-audio-to-docx',
+    async (
+      _,
+      files: AudioFileInfo[],
+      apiKeys: string[] | string,
+      authToken?: string,
+      resumeState?: ConversionResumeState
+    ): Promise<ConversionResult> => {
+      const resolvedKeys = (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter((k) => k?.trim());
 
-      mainWindow.webContents.send('conversion-progress', {
-        status: 'reading_file',
-        message: 'Calculating audio duration...',
-        percentage: 5
-      });
-
-      const audioService = new AudioProcessingService();
-
-      // Calculate total audio duration across all selected files and log to backend
-      let totalSeconds = 0;
       try {
-        for (const file of files) {
-          let dur = await audioService.getAudioDuration(file.filePath);
-          
-          if (file.startTime || file.endTime) {
-            const startSec = file.startTime ? timeToSeconds(file.startTime) : 0;
-            const endSec = file.endTime ? timeToSeconds(file.endTime) : dur;
-            let clippedDur = endSec - startSec;
-            if (clippedDur < 0) clippedDur = 0;
-            if (clippedDur > dur) clippedDur = dur;
-            dur = clippedDur;
+        const activeFiles = resumeState?.files ?? files;
+        if (!activeFiles || activeFiles.length === 0) {
+          throw new Error('No audio files selected.');
+        }
 
-            if (startSec > 1 || endSec < (await audioService.getAudioDuration(file.filePath)) - 1) {
-              file.needsClipping = true;
-            } else {
-              file.needsClipping = false;
+        mainWindow.webContents.send('conversion-progress', {
+          status: 'reading_file',
+          message: resumeState ? 'Resuming conversion...' : 'Calculating audio duration...',
+          percentage: 5
+        });
+
+        const audioService = new AudioProcessingService();
+        const particleSizeMinutes = Number(process.env.PARTICLE_SIZE_MINUTES) || 15;
+
+        if (!resumeState && authToken) {
+          try {
+            let totalSeconds = 0;
+            for (const file of activeFiles) {
+              let dur = await audioService.getAudioDuration(file.filePath);
+              if (file.startTime || file.endTime) {
+                const startSec = file.startTime ? timeToSeconds(file.startTime) : 0;
+                const endSec = file.endTime ? timeToSeconds(file.endTime) : dur;
+                let clippedDur = endSec - startSec;
+                if (clippedDur < 0) clippedDur = 0;
+                if (clippedDur > dur) clippedDur = dur;
+                dur = clippedDur;
+              }
+              totalSeconds += Math.round(dur);
+            }
+
+            const apiUrl = process.env.VITE_API_URL || 'http://localhost:8000';
+            const payload = JSON.stringify({ total_seconds: totalSeconds, file_count: activeFiles.length });
+            const url = new URL('/api/usage', apiUrl);
+            const lib = url.protocol === 'https:' ? https : http;
+            await new Promise<void>((resolve, reject) => {
+              const req = lib.request(
+                url,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                    'Content-Length': Buffer.byteLength(payload)
+                  }
+                },
+                (res) => {
+                  if (res.statusCode === 401 || res.statusCode === 403) {
+                    reject(new Error('AUTH_ERROR'));
+                  } else {
+                    resolve();
+                  }
+                }
+              );
+              req.on('error', () => resolve());
+              req.write(payload);
+              req.end();
+            });
+          } catch (usageErr: any) {
+            if (usageErr.message === 'AUTH_ERROR') {
+              return { success: false, error: 'AUTH_ERROR' };
             }
           }
-          
-          totalSeconds += Math.round(dur);
         }
 
-        if (authToken) {
-          const apiUrl = process.env.VITE_API_URL || 'http://localhost:8000';
-          const payload = JSON.stringify({ total_seconds: totalSeconds, file_count: files.length });
-          const url = new URL('/api/usage', apiUrl);
-          const lib = url.protocol === 'https:' ? https : http;
-          await new Promise<void>((resolve, reject) => {
-            const req = lib.request(url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Length': Buffer.byteLength(payload),
-              }
-            }, (res) => {
-              if (res.statusCode === 401 || res.statusCode === 403) {
-                reject(new Error('AUTH_ERROR'));
-              } else {
-                resolve();
-              }
-            });
-            req.on('error', (err) => {
-              console.warn('[usage] Failed to log usage to backend:', err.message);
-              resolve(); // fail gracefully
-            });
-            req.write(payload);
-            req.end();
-          });
-          console.log(`[usage] Logged ${totalSeconds}s for ${files.length} file(s)`);
-        }
-      } catch (usageErr: any) {
-        if (usageErr.message === 'AUTH_ERROR') {
-          return { success: false, error: 'AUTH_ERROR' };
-        }
-        console.warn('[usage] Duration calc or logging failed, continuing anyway:', usageErr.message);
-      }
-      const particleSizeMinutes = Number(process.env.PARTICLE_SIZE_MINUTES) || 15;
+        let allChunks: string[][];
+        let maxChunks: number;
 
-      let needsPreprocessing = false;
-      for (const file of files) {
-        if (path.extname(file.filePath).toLowerCase() !== '.mp3' || file.needsClipping) {
-          needsPreprocessing = true;
-          break;
-        }
-      }
-      if (totalSeconds > particleSizeMinutes * 60) {
-        needsPreprocessing = true;
-      }
-
-      let allChunks: string[][] = [];
-      let maxChunks = 0;
-
-      if (!needsPreprocessing) {
-        // Skip MP3 conversion and splitting entirely, use original files directly
-        allChunks = files.map(f => [f.filePath]);
-        maxChunks = 1;
-      } else {
-        // 1. Convert all files to MP3
-        const mp3Paths: string[] = [];
-        for (let i = 0; i < files.length; i++) {
-          mainWindow.webContents.send('conversion-progress', {
-            status: 'reading_file',
-            message: `Converting file ${i + 1} of ${files.length} to MP3...`,
-            percentage: 10
-          });
-          const mp3Path = await audioService.convertToMp3(files[i], (msg) => {
-            mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 10 });
-          });
-          mp3Paths.push(mp3Path);
+        if (resumeState) {
+          allChunks = resumeState.allChunks;
+          maxChunks = Math.max(...allChunks.map((chunks) => chunks.length), 0);
+        } else {
+          const prepared = await prepareAudioChunks(activeFiles, audioService, mainWindow, particleSizeMinutes);
+          allChunks = prepared.allChunks;
+          maxChunks = prepared.maxChunks;
         }
 
-        // 2. Split all MP3s into chunks
-        for (let i = 0; i < mp3Paths.length; i++) {
-          mainWindow.webContents.send('conversion-progress', {
-            status: 'reading_file',
-            message: `Splitting file ${i + 1} of ${mp3Paths.length} into ${particleSizeMinutes}-minute chunks...`,
-            percentage: 20
-          });
-          const chunks = await audioService.splitIntoChunks(mp3Paths[i], particleSizeMinutes, (msg) => {
-            mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 20 });
-          });
-          allChunks.push(chunks);
-          if (chunks.length > maxChunks) {
-            maxChunks = chunks.length;
+        const startChunkIndex = resumeState?.startFromChunkIndex ?? 0;
+        let fullTranscription = resumeState?.existingTranscription ?? '';
+
+        for (let chunkIndex = startChunkIndex; chunkIndex < maxChunks; chunkIndex++) {
+          const percent = 20 + Math.floor((chunkIndex / maxChunks) * 60);
+
+          const currentBatch: string[] = [];
+          for (let fileIndex = 0; fileIndex < allChunks.length; fileIndex++) {
+            if (allChunks[fileIndex][chunkIndex]) {
+              currentBatch.push(allChunks[fileIndex][chunkIndex]);
+            }
           }
-        }
-      }
 
-      // 3. Process chunks sequentially
-      let fullTranscription = '';
-      for (let chunkIndex = 0; chunkIndex < maxChunks; chunkIndex++) {
-        const percent = 20 + Math.floor((chunkIndex / maxChunks) * 60); // 20% to 80%
+          if (currentBatch.length === 0) {
+            continue;
+          }
 
-        // Gather chunk 'chunkIndex' from each file
-        const currentBatch: string[] = [];
-        for (let fileIndex = 0; fileIndex < allChunks.length; fileIndex++) {
-          if (allChunks[fileIndex][chunkIndex]) {
-            currentBatch.push(allChunks[fileIndex][chunkIndex]);
+          mainWindow.webContents.send('conversion-progress', {
+            status: 'transcribing',
+            message: `Transcribing part ${chunkIndex + 1} of ${maxChunks}...`,
+            percentage: percent
+          });
+
+          try {
+            const partTranscription = await transcribeChunkWithRetry(currentBatch, resolvedKeys, geminiService);
+            fullTranscription += (fullTranscription ? '\n\n' : '') + partTranscription;
+          } catch (err: any) {
+            const completedChunks = chunkIndex;
+            const hasPartialText = fullTranscription.trim().length > 0;
+
+            if (hasPartialText) {
+              mainWindow.webContents.send('conversion-progress', {
+                status: 'generating_docx',
+                message: `Saving partial document (${completedChunks} of ${maxChunks} parts completed)...`,
+                percentage: 85
+              });
+
+              const docxPath = await docxService.generateDocx(activeFiles[0].filePath, fullTranscription);
+
+              mainWindow.webContents.send('conversion-progress', {
+                status: 'error',
+                message: `Stopped at part ${chunkIndex + 1} of ${maxChunks}. Partial document saved.`,
+                percentage: percent
+              });
+
+              return {
+                success: false,
+                partial: true,
+                docxPath,
+                transcription: fullTranscription,
+                completedChunks,
+                totalChunks: maxChunks,
+                error: err.message || 'Conversion stopped before all parts were processed.',
+                resumeState: {
+                  startFromChunkIndex: chunkIndex,
+                  existingTranscription: fullTranscription,
+                  allChunks,
+                  files: activeFiles
+                }
+              };
+            }
+
+            throw err;
           }
         }
 
         mainWindow.webContents.send('conversion-progress', {
-          status: 'transcribing',
-          message: `Processing part ${chunkIndex + 1} of ${maxChunks}...`,
-          percentage: percent
+          status: 'generating_docx',
+          message: 'Creating formatted Word (.docx) document...',
+          percentage: 85
         });
 
-        try {
-          const partTranscription = await geminiService.transcribeAudioFiles(currentBatch, apiKey);
-          fullTranscription += partTranscription + '\n\n';
-        } catch (err: any) {
-          if (fullTranscription.trim().length > 0) {
-            console.warn(`[Handlers] Error processing part ${chunkIndex + 1}, but proceeding with partial result:`, err);
-            mainWindow.webContents.send('conversion-progress', {
-              status: 'transcribing',
-              message: `Part ${chunkIndex + 1} failed, generating document with partial result...`,
-              percentage: percent
-            });
-            break; // Exit the loop and generate docx with what we have
-          } else {
-            // If even the first chunk fails, we throw the error to fail the whole process
-            throw err; 
-          }
-        }
+        const docxPath = await docxService.generateDocx(activeFiles[0].filePath, fullTranscription);
+
+        mainWindow.webContents.send('conversion-progress', {
+          status: 'completed',
+          message: 'Conversion completed successfully!',
+          percentage: 100
+        });
+
+        return {
+          success: true,
+          docxPath,
+          transcription: fullTranscription,
+          completedChunks: maxChunks,
+          totalChunks: maxChunks
+        };
+      } catch (error: any) {
+        mainWindow.webContents.send('conversion-progress', {
+          status: 'error',
+          message: error.message || 'An error occurred during conversion.',
+          percentage: 0
+        });
+
+        return {
+          success: false,
+          error: error.message || 'Unknown error occurred during conversion.'
+        };
       }
-
-      mainWindow.webContents.send('conversion-progress', {
-        status: 'generating_docx',
-        message: 'Creating formatted Word (.docx) document...',
-        percentage: 85
-      });
-
-      // Use the first original file path to determine output directory and format
-      const docxPath = await docxService.generateDocx(files[0].filePath, fullTranscription);
-
-      mainWindow.webContents.send('conversion-progress', {
-        status: 'completed',
-        message: 'Conversion completed successfully!',
-        percentage: 100
-      });
-
-      return {
-        success: true,
-        docxPath,
-        transcription: fullTranscription
-      };
-    } catch (error: any) {
-      mainWindow.webContents.send('conversion-progress', {
-        status: 'error',
-        message: error.message || 'An error occurred during conversion.',
-        percentage: 0
-      });
-
-      return {
-        success: false,
-        error: error.message || 'Unknown error occurred during conversion.'
-      };
     }
-  });
+  );
 
-  // Open directory containing generated document
   ipcMain.handle('open-folder', async (_, filePath: string): Promise<void> => {
     if (fs.existsSync(filePath)) {
       shell.showItemInFolder(filePath);

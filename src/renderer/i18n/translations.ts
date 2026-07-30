@@ -4,7 +4,7 @@ export const translations = {
   en: {
     // App & Nav
     'app.title': 'Audio-to-Word Converter',
-    'app.subtitle': 'AI Voice Studio',
+    'app.subtitle': 'Voice Studio',
     'nav.converter': 'Audio Converter',
     'nav.users': 'User Management',
     'nav.logout': 'Logout',
@@ -14,7 +14,7 @@ export const translations = {
 
     // Login Screen
     'login.welcome': 'Welcome Back',
-    'login.subtitle': 'Sign in to access Audio-to-Word AI Converter',
+    'login.subtitle': 'Sign in to access Audio-to-Word Converter',
     'login.email_label': 'Email Address',
     'login.email_placeholder': 'name@company.com',
     'login.password_label': 'Password',
@@ -41,7 +41,7 @@ export const translations = {
     'options.multi_label': 'Allow multiple audio files (Up to 3)',
     'options.multi_desc': 'Merge up to 3 tracks into a single high-accuracy document',
     'options.accuracy_label': 'Make more accurate merging compared audio files',
-    'options.accuracy_desc': 'Uses deep multi-pass AI comparison to eliminate background noise and garbled words',
+    'options.accuracy_desc': 'Uses multi-source audio comparison to reduce background noise and unclear words',
 
     // Progress & Action
     'converter.btn_convert': 'Convert to Word (.docx)',
@@ -58,6 +58,15 @@ export const translations = {
     'result.output_path': 'Saved Location:',
     'result.btn_open': 'Open Output Folder',
     'result.btn_convert_another': 'Convert Another Audio',
+
+    // Partial conversion dialog
+    'partial.title': 'Conversion Stopped Early',
+    'partial.message': 'Processed {completed} of {total} parts before an error occurred. A partial Word document has been saved.',
+    'partial.btn_resume': 'Continue From Where It Stopped',
+    'partial.btn_restart': 'Start Over From Beginning',
+    'partial.btn_open_partial': 'Open Partial Document Folder',
+    'partial.saved_title': 'Partial Document Saved',
+    'partial.saved_desc': '{completed} of {total} parts were converted.',
     'result.preview_title': 'Transcription Summary Preview:',
 
     // User Management
@@ -107,7 +116,7 @@ export const translations = {
   si: {
     // App & Nav
     'app.title': 'ඔඩියෝ-වර්ඩ් පරිවර්තකය',
-    'app.subtitle': 'AI හඬ ස්ටූඩියෝව',
+    'app.subtitle': 'හඬ ස්ටූඩියෝව',
     'nav.converter': 'ඔඩියෝ පරිවර්තකය',
     'nav.users': 'පරිශීලක කළමනාකරණය',
     'nav.logout': 'නික්මෙන්න',
@@ -117,7 +126,7 @@ export const translations = {
 
     // Login Screen
     'login.welcome': 'සාදරයෙන් පිළිගනිමු',
-    'login.subtitle': 'ඔඩියෝ-වර්ඩ් AI පරිවර්තකය භාවිතයට පිවිසෙන්න',
+    'login.subtitle': 'ඔඩියෝ-වර්ඩ් පරිවර්තකය භාවිතයට පිවිසෙන්න',
     'login.email_label': 'විද්‍යුත් තැපැල් ලිපිනය (Email)',
     'login.email_placeholder': 'name@company.com',
     'login.password_label': 'මුරපදය (Password)',
@@ -161,6 +170,15 @@ export const translations = {
     'result.output_path': 'සුරකින ලද ස්ථානය:',
     'result.btn_open': 'ෆෝල්ඩරය විවෘත කරන්න',
     'result.btn_convert_another': 'තවත් ඔඩියෝවක් පරිවර්තනය කරන්න',
+
+    // Partial conversion dialog
+    'partial.title': 'පරිවර්තනය අතරතුර නතර විය',
+    'partial.message': 'දෝෂයක් හේතුවෙන් {total} කොටස් වලින් {completed} ක් පමණක් සම්පූර්ණ විය. අර්ධ Word ලේඛනයක් සුරකින ලදී.',
+    'partial.btn_resume': 'නතර වූ තැනින් දිගටම කරගෙන යන්න',
+    'partial.btn_restart': 'ආරම්භයේ සිට නැවත ආරම්භ කරන්න',
+    'partial.btn_open_partial': 'අර්ධ ලේඛන ෆෝල්ඩරය විවෘත කරන්න',
+    'partial.saved_title': 'අර්ධ ලේඛනය සුරකින ලදී',
+    'partial.saved_desc': '{total} කොටස් වලින් {completed} ක් පරිවර්තනය විය.',
     'result.preview_title': 'පරිවර්තනය කරන ලද පෙළ පෙරදසුන:',
 
     // User Management

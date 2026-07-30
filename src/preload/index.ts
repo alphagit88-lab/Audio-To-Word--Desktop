@@ -1,10 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { ConversionProgress, AudioFileInfo } from '../types';
+import { ConversionProgress, AudioFileInfo, ConversionResumeState } from '../types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   selectAudioFile: (allowMultiple?: boolean) => ipcRenderer.invoke('select-audio-file', allowMultiple),
-  convertAudioToDocx: (files: AudioFileInfo[], apiKey?: string, authToken?: string) =>
-    ipcRenderer.invoke('convert-audio-to-docx', files, apiKey, authToken),
+  convertAudioToDocx: (
+    files: AudioFileInfo[],
+    apiKeys: string[],
+    authToken?: string,
+    resumeState?: ConversionResumeState
+  ) => ipcRenderer.invoke('convert-audio-to-docx', files, apiKeys, authToken, resumeState),
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   onProgress: (callback: (progress: ConversionProgress) => void) => {
     const subscription = (_: any, progress: ConversionProgress) => callback(progress);
