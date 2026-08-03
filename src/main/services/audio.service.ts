@@ -65,8 +65,8 @@ export class AudioProcessingService {
         cmd = cmd.setStartTime(file.startTime);
       }
       if (file.endTime) {
-        // Output option -to ends at this specific time in the original input
-        cmd = cmd.outputOptions(['-to', file.endTime]);
+        // Input option -to ends at this specific time in the original input
+        cmd = cmd.inputOptions(['-to', file.endTime]);
       }
 
       cmd

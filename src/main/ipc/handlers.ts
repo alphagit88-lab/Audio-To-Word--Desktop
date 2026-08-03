@@ -6,7 +6,7 @@ import https from 'https';
 import { GeminiTranscriptionService } from '../services/gemini.service';
 import { DocxGeneratorService } from '../services/docx.service';
 import { AudioProcessingService } from '../services/audio.service';
-import { ConversionResult, AudioFileInfo, ConversionResumeState } from '../../types';
+import { ConversionResult, AudioFileInfo, ConversionResumeState, ConversionPromptOptions } from '../../types';
 
 function timeToSeconds(timeStr?: string): number {
   if (!timeStr) return 0;
@@ -23,7 +23,8 @@ function delay(ms: number): Promise<void> {
 async function transcribeChunkWithRetry(
   batch: string[],
   apiKeys: string[],
-  geminiService: GeminiTranscriptionService
+  geminiService: GeminiTranscriptionService,
+  promptOptions?: ConversionPromptOptions
 ): Promise<string> {
   if (apiKeys.length === 0) {
     throw new Error('No service keys configured.');
@@ -34,7 +35,7 @@ async function transcribeChunkWithRetry(
   for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex++) {
     const apiKey = apiKeys[keyIndex];
     try {
-      return await geminiService.transcribeAudioFiles(batch, apiKey);
+      return await geminiService.transcribeAudioFiles(batch, apiKey, undefined, promptOptions);
     } catch (err: any) {
       lastError = err instanceof Error ? err : new Error(err?.message || 'Transcription failed.');
       if (keyIndex < apiKeys.length - 1) {
@@ -125,6 +126,11 @@ async function prepareAudioChunks(
 export function setupIpcHandlers(mainWindow: BrowserWindow): void {
   const geminiService = new GeminiTranscriptionService();
   const docxService = new DocxGeneratorService();
+  let isConversionCanceled = false;
+
+  ipcMain.handle('cancel-conversion', async () => {
+    isConversionCanceled = true;
+  });
 
   ipcMain.handle('select-audio-file', async (_, allowMultiple: boolean = false): Promise<AudioFileInfo[] | null> => {
     const properties: ('openFile' | 'multiSelections')[] = ['openFile'];
@@ -164,9 +170,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       files: AudioFileInfo[],
       apiKeys: string[] | string,
       authToken?: string,
-      resumeState?: ConversionResumeState
+      resumeState?: ConversionResumeState,
+      promptOptions?: ConversionPromptOptions
     ): Promise<ConversionResult> => {
       const resolvedKeys = (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter((k) => k?.trim());
+      isConversionCanceled = false;
 
       try {
         const activeFiles = resumeState?.files ?? files;
@@ -199,9 +207,9 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
               totalSeconds += Math.round(dur);
             }
 
-            const apiUrl = process.env.VITE_API_URL || 'http://localhost:8000';
+            const apiUrl = process.env.VITE_API_URL;
             const payload = JSON.stringify({ total_seconds: totalSeconds, file_count: activeFiles.length });
-            const url = new URL('/api/usage', apiUrl);
+            const url = new URL(apiUrl + '/api/usage');
             const lib = url.protocol === 'https:' ? https : http;
             await new Promise<void>((resolve, reject) => {
               const req = lib.request(
@@ -250,6 +258,14 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         let fullTranscription = resumeState?.existingTranscription ?? '';
 
         for (let chunkIndex = startChunkIndex; chunkIndex < maxChunks; chunkIndex++) {
+          if (isConversionCanceled) {
+            mainWindow.webContents.send('conversion-progress', {
+              status: 'error',
+              message: 'Conversion canceled by user.',
+              percentage: 0
+            });
+            return { success: false, error: 'Conversion canceled by user.' };
+          }
           const percent = 20 + Math.floor((chunkIndex / maxChunks) * 60);
 
           const currentBatch: string[] = [];
@@ -270,9 +286,52 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           });
 
           try {
-            const partTranscription = await transcribeChunkWithRetry(currentBatch, resolvedKeys, geminiService);
+            const abortPromise = new Promise<string>((_, reject) => {
+              const checkInterval = setInterval(() => {
+                if (isConversionCanceled) {
+                  clearInterval(checkInterval);
+                  reject(new Error('Conversion canceled by user.'));
+                }
+              }, 500);
+            });
+
+            const partTranscription = await Promise.race([
+              transcribeChunkWithRetry(currentBatch, resolvedKeys, geminiService, promptOptions),
+              abortPromise
+            ]);
             fullTranscription += (fullTranscription ? '\n\n' : '') + partTranscription;
           } catch (err: any) {
+            if (isConversionCanceled || err.message === 'Conversion canceled by user.') {
+              mainWindow.webContents.send('conversion-progress', {
+                status: 'error',
+                message: 'Conversion canceled by user.',
+                percentage: 0
+              });
+              return { success: false, error: 'Conversion canceled by user.' };
+            }
+
+            // Log error to backend if authenticated
+            if (authToken) {
+              try {
+                const apiUrl = process.env.VITE_API_URL;
+                const payload = JSON.stringify({ error_message: err.message || 'Unknown AI Error' });
+                const url = new URL(apiUrl + '/api/error-logs');
+                const lib = url.protocol === 'https:' ? https : http;
+                const req = lib.request(url, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                    'Content-Length': Buffer.byteLength(payload)
+                  }
+                });
+                req.on('error', () => {});
+                req.write(payload);
+                req.end();
+              } catch (logErr) {}
+            }
+
             const completedChunks = chunkIndex;
             const hasPartialText = fullTranscription.trim().length > 0;
 
@@ -339,6 +398,28 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           message: error.message || 'An error occurred during conversion.',
           percentage: 0
         });
+
+        // Also log general conversion errors if authenticated
+        if (authToken) {
+          try {
+            const apiUrl = process.env.VITE_API_URL;
+            const payload = JSON.stringify({ error_message: error.message || 'Unknown Conversion Error' });
+            const url = new URL(apiUrl + '/api/error-logs');
+            const lib = url.protocol === 'https:' ? https : http;
+            const req = lib.request(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                Authorization: `Bearer ${authToken}`,
+                'Content-Length': Buffer.byteLength(payload)
+              }
+            });
+            req.on('error', () => {});
+            req.write(payload);
+            req.end();
+          } catch (logErr) {}
+        }
 
         return {
           success: false,

@@ -15,6 +15,16 @@ export interface ConversionResumeState {
   files: AudioFileInfo[];
 }
 
+export interface ConversionPromptOptions {
+  transcriptionModel?: string;
+  additionalInstructions?: string;
+  exampleDocx?: {
+    fileName: string;
+    mimeType: string;
+    dataBase64: string;
+  };
+}
+
 export type ConversionStatus = 'idle' | 'reading_file' | 'transcribing' | 'generating_docx' | 'completed' | 'error';
 
 export interface ConversionProgress {
@@ -40,13 +50,15 @@ export interface ElectronAPI {
     files: AudioFileInfo[],
     apiKeys: string[],
     authToken?: string,
-    resumeState?: ConversionResumeState
+    resumeState?: ConversionResumeState,
+    promptOptions?: ConversionPromptOptions
   ) => Promise<ConversionResult>;
   openFolder: (filePath: string) => Promise<void>;
   onProgress: (callback: (progress: ConversionProgress) => void) => () => void;
   startUpdateDownload: () => void;
   quitAndInstallUpdate: () => void; // kept for compatibility
   runDownloadedUpdate: () => Promise<boolean>;
+  cancelConversion: () => Promise<void>;
   onUpdateAvailable: (callback: (version: string) => void) => () => void;
   onUpdateDownloaded: (callback: (filePath: string) => void) => () => void;
   onUpdateProgress: (callback: (percent: number) => void) => () => void;

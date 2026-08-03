@@ -132,7 +132,7 @@ export const ConversionStatusCard: React.FC<ConversionStatusCardProps> = ({
                 })}
               </p>
               {result.error && (
-                <p style={{ fontSize: '0.8rem', color: '#fca5a5', marginTop: '0.35rem' }}>{result.error}</p>
+                <p style={{ fontSize: '0.8rem', color: '#fca5a5', marginTop: '0.35rem' }}>{t('converter.error_failed_transcribe')}</p>
               )}
               <div style={{
                 background: 'rgba(0, 0, 0, 0.3)',
@@ -184,7 +184,7 @@ export const ConversionStatusCard: React.FC<ConversionStatusCardProps> = ({
               {t('converter.status_error')}
             </h4>
             <p style={{ fontSize: '0.85rem', color: '#fca5a5', marginTop: '0.2rem' }}>
-              {result.error}
+              {t('converter.error_failed_transcribe')}
             </p>
           </div>
         </div>

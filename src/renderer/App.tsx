@@ -4,10 +4,11 @@ import { AudioPicker } from './components/AudioPicker';
 import { ConversionStatusCard } from './components/ConversionStatusCard';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
-import { AudioFileInfo, ConversionProgress, ConversionResult, ConversionResumeState } from '../types';
+import { AudioFileInfo, ConversionProgress, ConversionResult, ConversionResumeState, ConversionPromptOptions } from '../types';
 import { LogOut, FileAudio, Users, DownloadCloud, RefreshCw, Clock, File, BarChart3 } from 'lucide-react';
 import { LanguageProvider, useTranslation } from './context/LanguageContext';
 import { PartialConversionDialog } from './components/PartialConversionDialog';
+import { CancelConfirmationDialog } from './components/CancelConfirmationDialog';
 
 interface UsageStats {
   total_seconds: number;
@@ -40,6 +41,10 @@ const MainAppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'converter' | 'users'>('converter');
   const [selectedFiles, setSelectedFiles] = useState<AudioFileInfo[] | null>(null);
   const [allowMultiple, setAllowMultiple] = useState<boolean>(false);
+  const [transcriptionModel, setTranscriptionModel] = useState<string>('gemini-3.5-flash-lite');
+  const [additionalInstructionsEnabled, setAdditionalInstructionsEnabled] = useState<boolean>(false);
+  const [additionalInstructionsText, setAdditionalInstructionsText] = useState<string>('');
+  const [exampleDocxFile, setExampleDocxFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<ConversionProgress>({
     status: 'idle',
     message: '',
@@ -48,6 +53,7 @@ const MainAppContent: React.FC = () => {
   const [conversionResult, setConversionResult] = useState<ConversionResult | null>(null);
   const [resumeState, setResumeState] = useState<ConversionResumeState | null>(null);
   const [showPartialDialog, setShowPartialDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
 
   const baseUrl = import.meta.env.VITE_API_URL;
 
@@ -223,9 +229,23 @@ const MainAppContent: React.FC = () => {
     }
   };
 
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error('Failed to read file.'));
+      reader.readAsDataURL(file);
+    });
+  };
+
   const runConversion = async (resume?: ConversionResumeState) => {
     const files = resume?.files ?? selectedFiles;
     if (!files || files.length === 0) return;
+
 
     setConversionResult(null);
     setShowPartialDialog(false);
@@ -241,11 +261,32 @@ const MainAppContent: React.FC = () => {
     }
 
     try {
+      let promptOptions: ConversionPromptOptions = { transcriptionModel };
+      if (additionalInstructionsEnabled) {
+        const trimmed = additionalInstructionsText.trim();
+        let exampleDocx: ConversionPromptOptions['exampleDocx'] | undefined;
+        if (exampleDocxFile) {
+          const base64 = await readFileAsBase64(exampleDocxFile);
+          exampleDocx = {
+            fileName: exampleDocxFile.name,
+            mimeType: exampleDocxFile.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            dataBase64: base64
+          };
+        }
+        if (trimmed) {
+          promptOptions.additionalInstructions = trimmed;
+        }
+        if (exampleDocx) {
+          promptOptions.exampleDocx = exampleDocx;
+        }
+      }
+
       const result = await window.electronAPI.convertAudioToDocx(
         files,
         apiKeys,
         resume ? undefined : (token ?? undefined),
-        resume
+        resume,
+        promptOptions
       );
 
       if (result.error === 'AUTH_ERROR') {
@@ -286,6 +327,13 @@ const MainAppContent: React.FC = () => {
     setResumeState(null);
     setShowPartialDialog(false);
     runConversion(undefined);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (window.electronAPI.cancelConversion) {
+      await window.electronAPI.cancelConversion();
+    }
+    setShowCancelDialog(false);
   };
 
   const handleOpenFolder = (filePath: string) => {
@@ -397,6 +445,13 @@ const MainAppContent: React.FC = () => {
         />
       )}
 
+      {showCancelDialog && (
+        <CancelConfirmationDialog
+          onConfirm={handleConfirmCancel}
+          onCancel={() => setShowCancelDialog(false)}
+        />
+      )}
+
       {/* Navigation Sub-bar */}
       <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: '0.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -499,7 +554,16 @@ const MainAppContent: React.FC = () => {
                 onConvert={handleConvert}
                 allowMultiple={allowMultiple}
                 setAllowMultiple={setAllowMultiple}
+                transcriptionModel={transcriptionModel}
+                setTranscriptionModel={setTranscriptionModel}
+                additionalInstructionsEnabled={additionalInstructionsEnabled}
+                setAdditionalInstructionsEnabled={setAdditionalInstructionsEnabled}
+                additionalInstructionsText={additionalInstructionsText}
+                setAdditionalInstructionsText={setAdditionalInstructionsText}
+                exampleDocxFile={exampleDocxFile}
+                setExampleDocxFile={setExampleDocxFile}
                 onUpdateFileConfig={handleUpdateFileConfig}
+                onCancelClick={() => setShowCancelDialog(true)}
               />
 
               {(progress.status !== 'idle' || conversionResult) && (

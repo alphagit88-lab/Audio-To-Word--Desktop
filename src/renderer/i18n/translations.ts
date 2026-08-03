@@ -42,6 +42,12 @@ export const translations = {
     'options.multi_desc': 'Merge up to 3 tracks into a single high-accuracy document',
     'options.accuracy_label': 'Make more accurate merging compared audio files',
     'options.accuracy_desc': 'Uses multi-source audio comparison to reduce background noise and unclear words',
+    'options.transcribe_with_label': 'Transcribe With',
+    'options.transcribe_model_1': 'Model 1 (Fast)',
+    'options.transcribe_model_2': 'Model 2 (Better Accuracy)',
+    'options.additional_instructions_label': 'Additional Instructions',
+    'options.additional_instructions_placeholder': 'Add any extra formatting or transcription preferences (optional)',
+    'options.example_docx_label': 'Example document (.docx) (optional)',
 
     // Progress & Action
     'converter.btn_convert': 'Convert to Word (.docx)',
@@ -52,6 +58,7 @@ export const translations = {
     'converter.status_docx': 'Generating formatted Word document...',
     'converter.status_completed': 'Conversion completed successfully!',
     'converter.status_error': 'Conversion Failed',
+    'converter.error_failed_transcribe': 'Failed to transcribe audio. Please try again.',
 
     // Result Card
     'result.success_title': 'Document Created Successfully!',
@@ -106,6 +113,7 @@ export const translations = {
     'common.error': 'Error',
     'common.success': 'Success',
     'common.close': 'Close',
+    'common.remove': 'Remove',
 
     // Audio Editor
     'editor.set_start': 'Set Start',
@@ -154,6 +162,12 @@ export const translations = {
     'options.multi_desc': 'ඉහළ නිවැරදි භාවයක් සඳහා ගොනු 3 ක් එකම ලේඛනයකට එකතු කරන්න',
     'options.accuracy_label': 'සංසන්දනාත්මක සම්බන්ධ කිරීම හරහා වඩාත් නිවැරදි කරන්න',
     'options.accuracy_desc': 'පසුබිම් ශබ්ද සහ අපැහැදිලි වචන ඉවත් කිරීමට සංසන්දනාත්මක සම්බන්ධ කිරීම භාවිතා කරයි',
+    'options.transcribe_with_label': 'මෙම ආකෘතියෙන් පෙළට හරවන්න',
+    'options.transcribe_model_1': 'මාදිලි 1 (වේගවත්)',
+    'options.transcribe_model_2': 'මාදිලි 2 (වැඩි නිවැරදිභාවය)',
+    'options.additional_instructions_label': 'අමතර උපදෙස්',
+    'options.additional_instructions_placeholder': 'අමතර හැඩතල/ලියවීමේ උපදෙස් එක් කරන්න (විකල්ප)',
+    'options.example_docx_label': 'උදාහරණ ලේඛනය (.docx) (විකල්ප)',
 
     // Progress & Action
     'converter.btn_convert': 'Word (.docx) බවට පරිවර්තනය කරන්න',
@@ -164,6 +178,7 @@ export const translations = {
     'converter.status_docx': 'Word ලේඛනය සකස් කරමින් පවතී...',
     'converter.status_completed': 'පරිවර්තනය සාර්ථකව අවසන් විය!',
     'converter.status_error': 'පරිවර්තනය අසාර්ථක විය',
+    'converter.error_failed_transcribe': 'හඬ පෙළට හරවීමට අසාර්ථකයි. නැවත උත්සාහ කරන්න.',
 
     // Result Card
     'result.success_title': 'ලේඛනය සාර්ථකව සාදන ලදී!',
@@ -218,6 +233,7 @@ export const translations = {
     'common.error': 'දෝෂයකි',
     'common.success': 'සාර්ථකයි',
     'common.close': 'වසා දමන්න',
+    'common.remove': 'ඉවත් කරන්න',
 
     // Audio Editor
     'editor.set_start': 'ආරම්භය සකසන්න',

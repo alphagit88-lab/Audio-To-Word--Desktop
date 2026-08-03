@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { UploadCloud, FileAudio, ArrowRight } from 'lucide-react';
 import { AudioFileInfo } from '../../types';
 import { useTranslation } from '../context/LanguageContext';
@@ -11,7 +11,16 @@ interface AudioPickerProps {
   onConvert: () => void;
   allowMultiple: boolean;
   setAllowMultiple: (val: boolean) => void;
+  transcriptionModel: string;
+  setTranscriptionModel: (val: string) => void;
+  additionalInstructionsEnabled: boolean;
+  setAdditionalInstructionsEnabled: (val: boolean) => void;
+  additionalInstructionsText: string;
+  setAdditionalInstructionsText: (val: string) => void;
+  exampleDocxFile: File | null;
+  setExampleDocxFile: (val: File | null) => void;
   onUpdateFileConfig: (index: number, updates: Partial<AudioFileInfo>) => void;
+  onCancelClick: () => void;
 }
 
 export const AudioPicker: React.FC<AudioPickerProps> = ({
@@ -21,9 +30,19 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
   onConvert,
   allowMultiple,
   setAllowMultiple,
-  onUpdateFileConfig
+  transcriptionModel,
+  setTranscriptionModel,
+  additionalInstructionsEnabled,
+  setAdditionalInstructionsEnabled,
+  additionalInstructionsText,
+  setAdditionalInstructionsText,
+  exampleDocxFile,
+  setExampleDocxFile,
+  onUpdateFileConfig,
+  onCancelClick
 }) => {
   const { t } = useTranslation();
+  const [docInputKey, setDocInputKey] = useState(0);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -175,31 +194,220 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
 
       {/* Convert Trigger Button */}
       {hasFiles && (
-        <button
-          onClick={onConvert}
-          disabled={isConverting}
-          style={{
-            background: isConverting
-              ? 'rgba(99, 102, 241, 0.5)'
-              : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-            color: '#ffffff',
-            border: 'none',
-            padding: '1rem 1.5rem',
-            borderRadius: '12px',
-            fontSize: '1rem',
-            fontWeight: 600,
-            cursor: isConverting ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.75rem',
-            boxShadow: isConverting ? 'none' : '0 4px 20px rgba(99, 102, 241, 0.4)',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          <span>{isConverting ? t('converter.btn_converting') : t('converter.btn_convert')}</span>
-          {!isConverting && <ArrowRight size={20} />}
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.45rem',
+              background: 'rgba(99, 102, 241, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              padding: '0.75rem 1rem',
+              borderRadius: '10px',
+              opacity: isConverting ? 0.6 : 1,
+              pointerEvents: isConverting ? 'none' : 'auto'
+            }}
+          >
+            <label style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 500 }}>
+              {t('options.transcribe_with_label')}
+            </label>
+            <select
+              value={transcriptionModel}
+              onChange={(e) => setTranscriptionModel(e.target.value)}
+              style={{
+                width: '100%',
+                background: 'rgba(15, 23, 42, 0.45)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '10px',
+                padding: '0.6rem 0.7rem',
+                color: '#e2e8f0',
+                fontSize: '0.85rem',
+                outline: 'none'
+              }}
+            >
+              <option value="gemini-3.5-flash-lite">{t('options.transcribe_model_1')}</option>
+              <option value="gemini-3.5-flash">{t('options.transcribe_model_2')}</option>
+            </select>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              background: 'rgba(99, 102, 241, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              padding: '0.75rem 1rem',
+              borderRadius: '10px',
+              opacity: isConverting ? 0.6 : 1,
+              pointerEvents: isConverting ? 'none' : 'auto'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <input
+                type="checkbox"
+                id="additionalInstructionsCheck"
+                checked={additionalInstructionsEnabled}
+                onChange={(e) => setAdditionalInstructionsEnabled(e.target.checked)}
+                style={{
+                  cursor: 'pointer',
+                  width: '15px',
+                  height: '15px',
+                  accentColor: 'var(--primary-accent)'
+                }}
+              />
+              <label
+                htmlFor="additionalInstructionsCheck"
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#e2e8f0',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}
+              >
+                {t('options.additional_instructions_label')}
+              </label>
+            </div>
+
+            {additionalInstructionsEnabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <textarea
+                  value={additionalInstructionsText}
+                  onChange={(e) => setAdditionalInstructionsText(e.target.value)}
+                  placeholder={t('options.additional_instructions_placeholder')}
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    resize: 'vertical',
+                    background: 'rgba(15, 23, 42, 0.45)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '10px',
+                    padding: '0.7rem 0.85rem',
+                    color: '#e2e8f0',
+                    fontSize: '0.85rem',
+                    lineHeight: 1.5,
+                    outline: 'none'
+                  }}
+                />
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 500 }}>
+                      {t('options.example_docx_label')}
+                    </span>
+                    {exampleDocxFile && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExampleDocxFile(null);
+                          setDocInputKey((k) => k + 1);
+                        }}
+                        style={{
+                          background: 'rgba(248, 113, 113, 0.08)',
+                          border: '1px solid rgba(248, 113, 113, 0.25)',
+                          color: '#fca5a5',
+                          padding: '0.25rem 0.55rem',
+                          borderRadius: '8px',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {t('common.remove')}
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    key={docInputKey}
+                    type="file"
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setExampleDocxFile(file);
+                    }}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(15, 23, 42, 0.45)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '10px',
+                      padding: '0.55rem 0.7rem',
+                      color: '#e2e8f0',
+                      fontSize: '0.85rem',
+                      outline: 'none'
+                    }}
+                  />
+
+                  {exampleDocxFile && (
+                    <span style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>
+                      {exampleDocxFile.name}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+          <button
+            onClick={onConvert}
+            disabled={isConverting}
+            style={{
+              flex: 1,
+              background: isConverting
+                ? 'rgba(99, 102, 241, 0.5)'
+                : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '1rem 1.5rem',
+              borderRadius: '12px',
+              fontSize: '1rem',
+              fontWeight: 600,
+              cursor: isConverting ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem',
+              boxShadow: isConverting ? 'none' : '0 4px 20px rgba(99, 102, 241, 0.4)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <span>{isConverting ? t('converter.btn_converting') : t('converter.btn_convert')}</span>
+            {!isConverting && <ArrowRight size={20} />}
+          </button>
+
+          {isConverting && (
+            <button
+              onClick={onCancelClick}
+              style={{
+                flex: 1,
+                background: 'rgba(239, 68, 68, 0.1)',
+                color: '#ef4444',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                padding: '1rem 1.5rem',
+                borderRadius: '12px',
+                fontSize: '1rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+              }}
+            >
+              <span>Cancel</span>
+            </button>
+          )}
+        </div>
+        </div>
       )}
     </div>
   );
