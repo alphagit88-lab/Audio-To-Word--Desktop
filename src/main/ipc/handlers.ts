@@ -51,7 +51,8 @@ async function prepareAudioChunks(
   files: AudioFileInfo[],
   audioService: AudioProcessingService,
   mainWindow: BrowserWindow,
-  particleSizeMinutes: number
+  particleSizeMinutes: number,
+  isCanceled?: () => boolean
 ): Promise<{ allChunks: string[][]; maxChunks: number }> {
   let totalSeconds = 0;
   for (const file of files) {
@@ -101,7 +102,7 @@ async function prepareAudioChunks(
     });
     const mp3Path = await audioService.convertToMp3(files[i], (msg) => {
       mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 10 });
-    });
+    }, isCanceled);
     mp3Paths.push(mp3Path);
   }
 
@@ -113,7 +114,7 @@ async function prepareAudioChunks(
     });
     const chunks = await audioService.splitIntoChunks(mp3Paths[i], particleSizeMinutes, (msg) => {
       mainWindow.webContents.send('conversion-progress', { status: 'reading_file', message: msg, percentage: 20 });
-    });
+    }, isCanceled);
     allChunks.push(chunks);
     if (chunks.length > maxChunks) {
       maxChunks = chunks.length;
@@ -249,7 +250,7 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           allChunks = resumeState.allChunks;
           maxChunks = Math.max(...allChunks.map((chunks) => chunks.length), 0);
         } else {
-          const prepared = await prepareAudioChunks(activeFiles, audioService, mainWindow, particleSizeMinutes);
+          const prepared = await prepareAudioChunks(activeFiles, audioService, mainWindow, particleSizeMinutes, () => isConversionCanceled);
           allChunks = prepared.allChunks;
           maxChunks = prepared.maxChunks;
         }
@@ -286,8 +287,9 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
           });
 
           try {
+            let checkInterval: NodeJS.Timeout;
             const abortPromise = new Promise<string>((_, reject) => {
-              const checkInterval = setInterval(() => {
+              checkInterval = setInterval(() => {
                 if (isConversionCanceled) {
                   clearInterval(checkInterval);
                   reject(new Error('Conversion canceled by user.'));
@@ -299,7 +301,34 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
               transcribeChunkWithRetry(currentBatch, resolvedKeys, geminiService, promptOptions),
               abortPromise
             ]);
+            clearInterval(checkInterval!);
             fullTranscription += (fullTranscription ? '\n\n' : '') + partTranscription;
+
+            // ── Save part docx + notify renderer for live review panel ──
+            try {
+              const audioDir = path.dirname(activeFiles[0].filePath);
+              const sourceDir = path.join(audioDir, 'source');
+              if (!fs.existsSync(sourceDir)) fs.mkdirSync(sourceDir, { recursive: true });
+              const baseName = path.basename(activeFiles[0].filePath, path.extname(activeFiles[0].filePath));
+              const partDocxPath = await docxService.generatePartDocx(sourceDir, chunkIndex, partTranscription, baseName);
+              mainWindow.webContents.send('chunk-transcribed', {
+                chunkIndex,
+                text: partTranscription,
+                total: maxChunks,
+                audioChunkPaths: currentBatch,
+                docxPath: partDocxPath,
+                primaryAudioFilePath: activeFiles[0].filePath
+              });
+            } catch (partSaveErr) {
+              console.error('[handlers] Part docx save failed (non-critical):', partSaveErr);
+              mainWindow.webContents.send('chunk-transcribed', {
+                chunkIndex,
+                text: partTranscription,
+                total: maxChunks,
+                audioChunkPaths: currentBatch,
+                primaryAudioFilePath: activeFiles[0].filePath
+              });
+            }
           } catch (err: any) {
             if (isConversionCanceled || err.message === 'Conversion canceled by user.') {
               mainWindow.webContents.send('conversion-progress', {
@@ -434,4 +463,83 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       shell.showItemInFolder(filePath);
     }
   });
+
+  // ── Resubmit a specific chunk with a correction prompt ───────────────────────
+  ipcMain.handle(
+    'resubmit-chunk',
+    async (
+      _,
+      chunkIndex: number,
+      audioPaths: string[],
+      userPrompt: string,
+      apiKeys: string[],
+      transcriptionModel: string,
+      primaryAudioFilePath: string,
+      authToken?: string,
+      existingText?: string
+    ): Promise<{ text: string; docxPath: string }> => {
+      const resolvedKeys = (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter((k) => k?.trim());
+      
+      let finalPrompt = userPrompt;
+      if (existingText && existingText.trim().length > 0) {
+        finalPrompt = `You are correcting a previous transcription segment. Here is the ORIGINAL TRANSCRIPTION:\n"""\n${existingText}\n"""\n\nPlease rewrite or fix it according to these USER INSTRUCTIONS:\n${userPrompt}\n\nIMPORTANT: Return ONLY the corrected transcription text. Do not include introductory phrases.`;
+      }
+
+      const resubmitOptions: ConversionPromptOptions = {
+        transcriptionModel: transcriptionModel || 'gemini-3.5-flash-lite',
+        additionalInstructions: finalPrompt
+      };
+      
+      let text = '';
+      try {
+        text = await transcribeChunkWithRetry(audioPaths, resolvedKeys, geminiService, resubmitOptions);
+      } catch (error: any) {
+        if (authToken) {
+          try {
+            const apiUrl = process.env.VITE_API_URL;
+            const payload = JSON.stringify({ error_message: error.message || 'Unknown Resubmission Error' });
+            const url = new URL(apiUrl + '/api/error-logs');
+            const lib = url.protocol === 'https:' ? https : http;
+            const req = lib.request(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                Authorization: `Bearer ${authToken}`,
+                'Content-Length': Buffer.byteLength(payload)
+              }
+            });
+            req.on('error', () => {});
+            req.write(payload);
+            req.end();
+          } catch (logErr) {}
+        }
+        throw new Error('An error occurred during resubmission. Please try again.');
+      }
+
+      let docxPath = '';
+      if (primaryAudioFilePath) {
+        const audioDir = path.dirname(primaryAudioFilePath);
+        const sourceDir = path.join(audioDir, 'source');
+        const baseName = path.basename(primaryAudioFilePath, path.extname(primaryAudioFilePath));
+        docxPath = await docxService.generatePartDocx(sourceDir, chunkIndex, text, baseName);
+      }
+
+      return { text, docxPath };
+    }
+  );
+
+  // ── Finalize: re-assemble corrected parts into the final docx ────────────────
+  ipcMain.handle(
+    'finalize-transcription',
+    async (
+      _,
+      parts: Array<{ chunkIndex: number; text: string }>,
+      primaryAudioFilePath: string
+    ): Promise<string> => {
+      const sortedParts = [...parts].sort((a, b) => a.chunkIndex - b.chunkIndex);
+      const fullText = sortedParts.map((p) => p.text).join('\n\n');
+      return docxService.generateDocx(primaryAudioFilePath, fullText);
+    }
+  );
 }

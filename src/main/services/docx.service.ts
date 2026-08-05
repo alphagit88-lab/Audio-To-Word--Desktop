@@ -69,4 +69,45 @@ export class DocxGeneratorService {
 
     return outputDocxPath;
   }
+
+  /**
+   * Saves a single transcribed chunk as its own docx file in the source/ folder.
+   * Used by the review panel feature to allow per-part inspection and correction.
+   */
+  public async generatePartDocx(
+    sourceDir: string,
+    partIndex: number,
+    text: string,
+    baseName: string
+  ): Promise<string> {
+    if (!fs.existsSync(sourceDir)) {
+      fs.mkdirSync(sourceDir, { recursive: true });
+    }
+    const outputPath = path.join(sourceDir, `${baseName}_part_${partIndex + 1}.docx`);
+
+    const paragraphs = text
+      .split('\n')
+      .filter((p) => p.trim().length > 0)
+      .map(
+        (textBlock) =>
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: textBlock.trim(),
+                size: 24,
+                font: 'Calibri'
+              })
+            ],
+            spacing: { after: 200, line: 360 }
+          })
+      );
+
+    const doc = new Document({
+      sections: [{ properties: {}, children: paragraphs }]
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    fs.writeFileSync(outputPath, buffer);
+    return outputPath;
+  }
 }

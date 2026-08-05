@@ -4,7 +4,8 @@ import { AudioPicker } from './components/AudioPicker';
 import { ConversionStatusCard } from './components/ConversionStatusCard';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
-import { AudioFileInfo, ConversionProgress, ConversionResult, ConversionResumeState, ConversionPromptOptions } from '../types';
+import { TranscriptionReviewPanel } from './components/TranscriptionReviewPanel';
+import { AudioFileInfo, ConversionProgress, ConversionResult, ConversionResumeState, ConversionPromptOptions, TranscriptionPart } from '../types';
 import { LogOut, FileAudio, Users, DownloadCloud, RefreshCw, Clock, File, BarChart3 } from 'lucide-react';
 import { LanguageProvider, useTranslation } from './context/LanguageContext';
 import { PartialConversionDialog } from './components/PartialConversionDialog';
@@ -43,6 +44,8 @@ const MainAppContent: React.FC = () => {
   const [allowMultiple, setAllowMultiple] = useState<boolean>(false);
   const [transcriptionModel, setTranscriptionModel] = useState<string>('gemini-3.5-flash-lite');
   const [additionalInstructionsEnabled, setAdditionalInstructionsEnabled] = useState<boolean>(false);
+  const [quickPrompts, setQuickPrompts] = useState<string[]>([]);
+  const [selectedQuickPrompt, setSelectedQuickPrompt] = useState<string>('Custom');
   const [additionalInstructionsText, setAdditionalInstructionsText] = useState<string>('');
   const [exampleDocxFile, setExampleDocxFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<ConversionProgress>({
@@ -54,6 +57,12 @@ const MainAppContent: React.FC = () => {
   const [resumeState, setResumeState] = useState<ConversionResumeState | null>(null);
   const [showPartialDialog, setShowPartialDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+
+  // Review panel state
+  const [transcriptionParts, setTranscriptionParts] = useState<TranscriptionPart[]>([]);
+  const [totalExpectedChunks, setTotalExpectedChunks] = useState(0);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
 
   const baseUrl = import.meta.env.VITE_API_URL;
 
@@ -124,6 +133,23 @@ const MainAppContent: React.FC = () => {
     }
   };
 
+  const fetchQuickPrompts = async (authToken: string) => {
+    try {
+      const response = await fetch(`${baseUrl}/api/quick-prompts`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Accept': 'application/json'
+        }
+      });
+      const data = await response.json();
+      if (response.ok && data.prompts) {
+        setQuickPrompts(data.prompts);
+      }
+    } catch (err) {
+      console.error('Failed to fetch quick prompts:', err);
+    }
+  };
+
   // Load and validate token on startup
   useEffect(() => {
     const initAuth = async () => {
@@ -147,6 +173,7 @@ const MainAppContent: React.FC = () => {
           setUser(data.user);
           fetchApiKeys(storedToken);
           fetchUsageSummary(storedToken);
+          fetchQuickPrompts(storedToken);
         } else {
           localStorage.removeItem('auth_token');
         }
@@ -169,6 +196,25 @@ const MainAppContent: React.FC = () => {
     }
   }, []);
 
+  // Subscribe to live chunk-transcribed events for the review panel
+  useEffect(() => {
+    if (!window.electronAPI?.onChunkTranscribed) return;
+    const unsubscribe = window.electronAPI.onChunkTranscribed((part) => {
+      setTranscriptionParts((prev) => {
+        const existing = prev.findIndex((p) => p.chunkIndex === part.chunkIndex);
+        if (existing >= 0) {
+          const updated = [...prev];
+          updated[existing] = part;
+          return updated;
+        }
+        return [...prev, part].sort((a, b) => a.chunkIndex - b.chunkIndex);
+      });
+      setTotalExpectedChunks(part.total);
+      setShowReviewPanel(true); // auto-open on first chunk
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Clear selected files when toggling allowMultiple
   useEffect(() => {
     setSelectedFiles(null);
@@ -183,6 +229,7 @@ const MainAppContent: React.FC = () => {
     setActiveTab('converter');
     fetchApiKeys(newToken);
     fetchUsageSummary(newToken);
+    fetchQuickPrompts(newToken);
   };
 
   const handleLogout = async () => {
@@ -204,6 +251,7 @@ const MainAppContent: React.FC = () => {
       setSelectedFiles(null);
       setApiKeys([]);
       setUsageStats(null);
+      setQuickPrompts([]);
       setConversionResult(null);
       setProgress({ status: 'idle', message: '', percentage: 0 });
     }
@@ -249,6 +297,13 @@ const MainAppContent: React.FC = () => {
 
     setConversionResult(null);
     setShowPartialDialog(false);
+    // Reset review panel only for fresh conversions — NOT when resuming,
+    // so already-transcribed parts remain visible in the panel.
+    if (!resume) {
+      setTranscriptionParts([]);
+      setTotalExpectedChunks(0);
+      setShowReviewPanel(false);
+    }
     setProgress({ status: 'reading_file', message: t('converter.status_reading'), percentage: 10 });
 
     if (apiKeys.length === 0) {
@@ -263,7 +318,13 @@ const MainAppContent: React.FC = () => {
     try {
       let promptOptions: ConversionPromptOptions = { transcriptionModel };
       if (additionalInstructionsEnabled) {
-        const trimmed = additionalInstructionsText.trim();
+        let promptToSend = '';
+        if (selectedQuickPrompt === 'Custom') {
+          promptToSend = additionalInstructionsText.trim();
+        } else {
+          promptToSend = selectedQuickPrompt;
+        }
+
         let exampleDocx: ConversionPromptOptions['exampleDocx'] | undefined;
         if (exampleDocxFile) {
           const base64 = await readFileAsBase64(exampleDocxFile);
@@ -273,8 +334,8 @@ const MainAppContent: React.FC = () => {
             dataBase64: base64
           };
         }
-        if (trimmed) {
-          promptOptions.additionalInstructions = trimmed;
+        if (promptToSend) {
+          promptOptions.additionalInstructions = promptToSend;
         }
         if (exampleDocx) {
           promptOptions.exampleDocx = exampleDocx;
@@ -345,7 +406,40 @@ const MainAppContent: React.FC = () => {
     setConversionResult(null);
     setResumeState(null);
     setShowPartialDialog(false);
+    setTranscriptionParts([]);
+    setTotalExpectedChunks(0);
+    setShowReviewPanel(false);
     setProgress({ status: 'idle', message: '', percentage: 0 });
+  };
+
+  // Review panel callbacks
+  const handlePartUpdated = (chunkIndex: number, newText: string, newDocxPath?: string) => {
+    setTranscriptionParts((prev) =>
+      prev.map((p) => p.chunkIndex === chunkIndex ? { ...p, text: newText, docxPath: newDocxPath } : p)
+    );
+  };
+
+  const handleFinalize = async (parts: TranscriptionPart[]) => {
+    if (parts.length === 0) return;
+    setIsFinalizing(true);
+    try {
+      const sorted = [...parts].sort((a, b) => a.chunkIndex - b.chunkIndex);
+      const primaryPath = sorted[0].primaryAudioFilePath;
+      const docxPath = await window.electronAPI.finalizeTranscription(
+        sorted.map((p) => ({ chunkIndex: p.chunkIndex, text: p.text })),
+        primaryPath
+      );
+      setConversionResult((prev) => prev
+        ? { ...prev, success: true, docxPath }
+        : { success: true, docxPath }
+      );
+      setShowReviewPanel(false);
+      window.electronAPI.openFolder(docxPath);
+    } catch (err: any) {
+      console.error('Finalize failed:', err);
+    } finally {
+      setIsFinalizing(false);
+    }
   };
 
   const isConverting = progress.status !== 'idle' && progress.status !== 'completed' && progress.status !== 'error';
@@ -449,6 +543,21 @@ const MainAppContent: React.FC = () => {
         <CancelConfirmationDialog
           onConfirm={handleConfirmCancel}
           onCancel={() => setShowCancelDialog(false)}
+        />
+      )}
+
+      {/* Transcription Review Panel — auto-opens after first chunk, overlaid above everything */}
+      {showReviewPanel && (
+        <TranscriptionReviewPanel
+          parts={transcriptionParts}
+          totalChunks={totalExpectedChunks}
+          apiKeys={apiKeys}
+          transcriptionModel={transcriptionModel}
+          onClose={() => setShowReviewPanel(false)}
+          onPartUpdated={handlePartUpdated}
+          onFinalize={handleFinalize}
+          isFinalizing={isFinalizing}
+          authToken={token}
         />
       )}
 
@@ -558,6 +667,9 @@ const MainAppContent: React.FC = () => {
                 setTranscriptionModel={setTranscriptionModel}
                 additionalInstructionsEnabled={additionalInstructionsEnabled}
                 setAdditionalInstructionsEnabled={setAdditionalInstructionsEnabled}
+                quickPrompts={quickPrompts}
+                selectedQuickPrompt={selectedQuickPrompt}
+                setSelectedQuickPrompt={setSelectedQuickPrompt}
                 additionalInstructionsText={additionalInstructionsText}
                 setAdditionalInstructionsText={setAdditionalInstructionsText}
                 exampleDocxFile={exampleDocxFile}

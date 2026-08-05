@@ -8,6 +8,15 @@ export interface AudioFileInfo {
   needsClipping?: boolean;
 }
 
+export interface TranscriptionPart {
+  chunkIndex: number;
+  text: string;
+  audioChunkPaths: string[];
+  docxPath?: string;
+  primaryAudioFilePath: string;
+  total: number;
+}
+
 export interface ConversionResumeState {
   startFromChunkIndex: number;
   existingTranscription: string;
@@ -62,6 +71,22 @@ export interface ElectronAPI {
   onUpdateAvailable: (callback: (version: string) => void) => () => void;
   onUpdateDownloaded: (callback: (filePath: string) => void) => () => void;
   onUpdateProgress: (callback: (percent: number) => void) => () => void;
+  // Review panel APIs
+  onChunkTranscribed: (callback: (part: TranscriptionPart) => void) => () => void;
+  resubmitChunk: (
+    chunkIndex: number,
+    audioPaths: string[],
+    userPrompt: string,
+    apiKeys: string[],
+    transcriptionModel: string,
+    primaryAudioFilePath: string,
+    authToken?: string,
+    existingText?: string
+  ) => Promise<{ text: string; docxPath: string }>;
+  finalizeTranscription: (
+    parts: Array<{ chunkIndex: number; text: string }>,
+    primaryAudioFilePath: string
+  ) => Promise<string>;
 }
 
 declare global {

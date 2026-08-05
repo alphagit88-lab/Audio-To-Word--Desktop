@@ -36,7 +36,7 @@ export class AudioProcessingService {
    * Converts a given audio file to MP3 (128kbps) and saves it to a 'source' folder.
    * If it's already an MP3, it simply copies it to the 'source' folder.
    */
-  public async convertToMp3(file: AudioFileInfo, onProgress?: (msg: string) => void): Promise<string> {
+  public async convertToMp3(file: AudioFileInfo, onProgress?: (msg: string) => void, isCanceled?: () => boolean): Promise<string> {
     const originalDir = path.dirname(file.filePath);
     const sourceDir = path.join(originalDir, 'source');
     
@@ -69,6 +69,8 @@ export class AudioProcessingService {
         cmd = cmd.inputOptions(['-to', file.endTime]);
       }
 
+      let checkInterval: NodeJS.Timeout;
+
       cmd
         .on('progress', (progress) => {
           if (progress.percent) {
@@ -76,13 +78,26 @@ export class AudioProcessingService {
           }
         })
         .on('error', (err: Error) => {
-          console.error(`[AudioService] Error converting ${file.filePath}:`, err);
+          clearInterval(checkInterval);
+          // Only log if it's not a manual SIGKILL cancellation
+          if (!err.message.includes('SIGKILL')) {
+            console.error(`[AudioService] Error converting ${file.filePath}:`, err);
+          }
           reject(err);
         })
         .on('end', () => {
+          clearInterval(checkInterval);
           resolve(outputPath);
         })
         .save(outputPath);
+        
+      checkInterval = setInterval(() => {
+        if (isCanceled && isCanceled()) {
+          cmd.kill('SIGKILL');
+          clearInterval(checkInterval);
+          reject(new Error('Conversion canceled by user.'));
+        }
+      }, 500);
     });
   }
 
@@ -91,7 +106,7 @@ export class AudioProcessingService {
    * Files are saved to the same directory as the input file (which should be the `source/` folder).
    * Returns an array of paths to the generated chunks.
    */
-  public async splitIntoChunks(filePath: string, chunkSizeMinutes: number, onProgress?: (msg: string) => void): Promise<string[]> {
+  public async splitIntoChunks(filePath: string, chunkSizeMinutes: number, onProgress?: (msg: string) => void, isCanceled?: () => boolean): Promise<string[]> {
     const durationSeconds = await this.getAudioDuration(filePath);
     const chunkSizeBytes = chunkSizeMinutes * 60;
     
@@ -117,7 +132,8 @@ export class AudioProcessingService {
       const startTime = i * chunkSizeBytes;
       
       const p = new Promise<string>((resolve, reject) => {
-        ffmpeg(filePath)
+        let checkInterval: NodeJS.Timeout;
+        const cmd = ffmpeg(filePath)
           .setStartTime(startTime)
           .setDuration(chunkSizeBytes)
           // Use copy to avoid re-encoding and make it extremely fast
@@ -128,13 +144,26 @@ export class AudioProcessingService {
              }
           })
           .on('error', (err: Error) => {
-            console.error(`[AudioService] Error splitting ${filePath} chunk ${i}:`, err);
+            clearInterval(checkInterval);
+            if (!err.message.includes('SIGKILL')) {
+              console.error(`[AudioService] Error splitting ${filePath} chunk ${i}:`, err);
+            }
             reject(err);
           })
           .on('end', () => {
+            clearInterval(checkInterval);
             resolve(chunkPath);
-          })
-          .save(chunkPath);
+          });
+          
+        cmd.save(chunkPath);
+          
+        checkInterval = setInterval(() => {
+          if (isCanceled && isCanceled()) {
+            cmd.kill('SIGKILL');
+            clearInterval(checkInterval);
+            reject(new Error('Conversion canceled by user.'));
+          }
+        }, 500);
       });
       promises.push(p);
     }

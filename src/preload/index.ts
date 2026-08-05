@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { ConversionProgress, AudioFileInfo, ConversionResumeState, ConversionPromptOptions } from '../types';
+import { ConversionProgress, AudioFileInfo, ConversionResumeState, ConversionPromptOptions, TranscriptionPart } from '../types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   selectAudioFile: (allowMultiple?: boolean) => ipcRenderer.invoke('select-audio-file', allowMultiple),
@@ -19,11 +19,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('conversion-progress', subscription);
     };
   },
-  
-  // Auto-Updater Expose
+
+  // Review panel: live chunk streaming + resubmit + finalize
+  onChunkTranscribed: (callback: (part: TranscriptionPart) => void) => {
+    const subscription = (_: any, part: TranscriptionPart) => callback(part);
+    ipcRenderer.on('chunk-transcribed', subscription);
+    return () => ipcRenderer.removeListener('chunk-transcribed', subscription);
+  },
+  resubmitChunk: (
+    chunkIndex: number,
+    audioPaths: string[],
+    userPrompt: string,
+    apiKeys: string[],
+    transcriptionModel: string,
+    primaryAudioFilePath: string,
+    authToken?: string,
+    existingText?: string
+  ) => ipcRenderer.invoke('resubmit-chunk', chunkIndex, audioPaths, userPrompt, apiKeys, transcriptionModel, primaryAudioFilePath, authToken, existingText),
+  finalizeTranscription: (
+    parts: Array<{ chunkIndex: number; text: string }>,
+    primaryAudioFilePath: string
+  ) => ipcRenderer.invoke('finalize-transcription', parts, primaryAudioFilePath),
+
+  // Auto-Updater
   startUpdateDownload: () => ipcRenderer.send('start-update-download'),
   runDownloadedUpdate: () => ipcRenderer.invoke('run-downloaded-update'),
-  
+
   onUpdateAvailable: (callback: (version: string) => void) => {
     const subscription = (_: any, version: string) => callback(version);
     ipcRenderer.on('update-available', subscription);

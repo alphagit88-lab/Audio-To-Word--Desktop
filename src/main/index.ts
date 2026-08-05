@@ -20,9 +20,9 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   mainWindow = new BrowserWindow({
-    width: 850,
+    width: 1050,
     height: 650,
-    minWidth: 700,
+    minWidth: 900,
     minHeight: 550,
     title: 'Audio to Word Converter',
     autoHideMenuBar: true,

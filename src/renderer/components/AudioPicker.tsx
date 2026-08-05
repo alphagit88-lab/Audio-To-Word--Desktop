@@ -17,6 +17,9 @@ interface AudioPickerProps {
   setAdditionalInstructionsEnabled: (val: boolean) => void;
   additionalInstructionsText: string;
   setAdditionalInstructionsText: (val: string) => void;
+  quickPrompts: string[];
+  selectedQuickPrompt: string;
+  setSelectedQuickPrompt: (val: string) => void;
   exampleDocxFile: File | null;
   setExampleDocxFile: (val: File | null) => void;
   onUpdateFileConfig: (index: number, updates: Partial<AudioFileInfo>) => void;
@@ -36,6 +39,9 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
   setAdditionalInstructionsEnabled,
   additionalInstructionsText,
   setAdditionalInstructionsText,
+  quickPrompts,
+  selectedQuickPrompt,
+  setSelectedQuickPrompt,
   exampleDocxFile,
   setExampleDocxFile,
   onUpdateFileConfig,
@@ -272,24 +278,53 @@ export const AudioPicker: React.FC<AudioPickerProps> = ({
 
             {additionalInstructionsEnabled && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                <textarea
-                  value={additionalInstructionsText}
-                  onChange={(e) => setAdditionalInstructionsText(e.target.value)}
-                  placeholder={t('options.additional_instructions_placeholder')}
-                  rows={4}
-                  style={{
-                    width: '100%',
-                    resize: 'vertical',
-                    background: 'rgba(15, 23, 42, 0.45)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: '10px',
-                    padding: '0.7rem 0.85rem',
-                    color: '#e2e8f0',
-                    fontSize: '0.85rem',
-                    lineHeight: 1.5,
-                    outline: 'none'
-                  }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  <label style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 500 }}>
+                    Quick Prompt
+                  </label>
+                  <select
+                    value={selectedQuickPrompt}
+                    onChange={(e) => setSelectedQuickPrompt(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(15, 23, 42, 0.45)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '10px',
+                      padding: '0.6rem 0.7rem',
+                      color: '#e2e8f0',
+                      fontSize: '0.85rem',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="Custom">Custom</option>
+                    {quickPrompts.map((p, idx) => (
+                      <option key={idx} value={p}>
+                        {p.length > 60 ? p.substring(0, 60) + '...' : p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedQuickPrompt === 'Custom' && (
+                  <textarea
+                    value={additionalInstructionsText}
+                    onChange={(e) => setAdditionalInstructionsText(e.target.value)}
+                    placeholder={t('options.additional_instructions_placeholder')}
+                    rows={4}
+                    style={{
+                      width: '100%',
+                      resize: 'vertical',
+                      background: 'rgba(15, 23, 42, 0.45)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '10px',
+                      padding: '0.7rem 0.85rem',
+                      color: '#e2e8f0',
+                      fontSize: '0.85rem',
+                      lineHeight: 1.5,
+                      outline: 'none'
+                    }}
+                  />
+                )}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
