@@ -133,7 +133,8 @@ export class GeminiTranscriptionService {
 
         const reason = response.candidates?.[0]?.finishReason;
         if (reason === 'RECITATION' || reason === 'SAFETY') {
-          throw new Error(`Received empty transcription. Reason: ${reason}`);
+          return '\n\n**Process aborted for this part due to recitation or safety reasons**\n\n';
+          //throw new Error(`Received empty transcription. Reason: ${reason}`);
         }
         throw new Error('Received empty transcription.');
       }

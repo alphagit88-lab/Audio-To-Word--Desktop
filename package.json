@@ -1,6 +1,6 @@
 {
   "name": "audio-to-word",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Desktop app to convert audio files into formatted Microsoft Word (.docx) documents.",
   "main": "dist/main/index.js",
   "author": "ITX",
