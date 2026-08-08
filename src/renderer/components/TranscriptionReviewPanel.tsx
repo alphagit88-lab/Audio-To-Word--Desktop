@@ -3,7 +3,7 @@ import { TranscriptionPart } from '../../types';
 import {
   X, RotateCcw, CheckCircle, Clock, FileText,
   Loader2, ChevronRight, Download, AlertCircle,
-  Minimize2, Maximize2
+  Minimize2, Maximize2, AlertTriangle, ChevronDown
 } from 'lucide-react';
 import { useTranslation } from '../context/LanguageContext';
 
@@ -17,6 +17,7 @@ interface Props {
   onFinalize: (parts: TranscriptionPart[]) => Promise<void>;
   isFinalizing: boolean;
   authToken: string | null;
+  speakerLabels?: string[];
 }
 
 export const TranscriptionReviewPanel: React.FC<Props> = ({
@@ -29,6 +30,7 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
   onFinalize,
   isFinalizing,
   authToken,
+  speakerLabels = [],
 }) => {
   const { t } = useTranslation();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -42,39 +44,21 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
   const [hoveredLineIdx, setHoveredLineIdx] = useState<number | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const nextTimestampRef = useRef<number | null>(null);
 
-  const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({});
-  const [showSpeakerMapping, setShowSpeakerMapping] = useState(false);
-  const [uniqueSpeakers, setUniqueSpeakers] = useState<string[]>([]);
-
+  // Auto-stop audio when it reaches the next timestamp
   useEffect(() => {
-    const speakers = new Set<string>();
-    // Exclude '[' and ']' from the speaker name to prevent matching timestamp fragments if the optional group fails.
-    const regex = /^(?:\[[\d:.,]+\]\s*)?([^:\[\]\n]{2,35}):/gm;
-    parts.forEach(p => {
-      let match;
-      while ((match = regex.exec(p.text)) !== null) {
-        const speaker = match[1].trim();
-        // Ignore strings that are too long, too short, or look like URLs/file paths
-        if (speaker.length >= 2 && speaker.length < 35 && !speaker.includes('http') && !speaker.includes('\\')) {
-          speakers.add(speaker);
-        }
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTimeUpdate = () => {
+      if (nextTimestampRef.current !== null && audio.currentTime >= nextTimestampRef.current) {
+        audio.pause();
+        nextTimestampRef.current = null;
       }
-    });
-    const speakerArray = Array.from(speakers);
-    setUniqueSpeakers(speakerArray);
-    setSpeakerMap(prev => {
-      const newMap = { ...prev };
-      let changed = false;
-      speakerArray.forEach(s => {
-        if (newMap[s] === undefined) {
-          newMap[s] = '';
-          changed = true;
-        }
-      });
-      return changed ? newMap : prev;
-    });
-  }, [parts]);
+    };
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    return () => audio.removeEventListener('timeupdate', onTimeUpdate);
+  }, [selectedIndex]);
 
   const selectedPart = parts.find((p) => p.chunkIndex === selectedIndex);
 
@@ -100,9 +84,10 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
     return seconds;
   };
 
-  const handleTimeClick = (timeStr: string) => {
+  const handleTimeClick = (timeStr: string, nextTimeStr?: string) => {
     if (!audioRef.current) return;
     audioRef.current.currentTime = parseTimestampToSeconds(timeStr);
+    nextTimestampRef.current = nextTimeStr ? parseTimestampToSeconds(nextTimeStr) : null;
     audioRef.current.play().catch(e => console.error('Audio play failed', e));
   };
 
@@ -160,17 +145,57 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
     }
   };
 
+  const handleInlineReplaceSpeaker = (oldSpk: string, newSpk: string) => {
+    if (!selectedPart || !newSpk || newSpk === oldSpk) return;
+    // Replace ALL occurrences of this speaker in the current part text
+    const escapedOldSpk = oldSpk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^((?:\\[[\\d:.,]+\\]\\s*)?)${escapedOldSpk}:`, 'gm');
+    const newText = selectedPart.text.replace(regex, `$1${newSpk}:`);
+    onPartUpdated(selectedPart.chunkIndex, newText, selectedPart.docxPath);
+  };
+
   const renderTextWithTimestamps = (text: string) => {
     const lines = text.split('\n');
+
+    // Build a flat list of timestamps in document order for next-timestamp lookup
+    const allTimestamps: { lineIdx: number; ts: string }[] = [];
+    lines.forEach((line, li) => {
+      const tsMatches = line.match(/[\[\(]\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?[\]\)]/g);
+      if (tsMatches) tsMatches.forEach(ts => allTimestamps.push({ lineIdx: li, ts }));
+    });
+
+    // Collect all unique speaker labels already present in this text (for reset option)
+    const speakerRegexGlobal = /^(?:\[[\d:.,]+\]\s*)?([^:\[\]\n]{2,35}):/gm;
+    const detectedSpeakers = new Set<string>();
+    let gm: RegExpExecArray | null = null;
+    while ((gm = speakerRegexGlobal.exec(text)) !== null) {
+      const s = gm[1].trim();
+      if (s.length >= 2 && s.length < 35 && !s.includes('http') && !s.includes('\\')) {
+        detectedSpeakers.add(s);
+      }
+    }
+
     return lines.map((line, lineIdx) => {
       if (!line.trim()) return <div key={lineIdx} style={{ height: '0.8rem' }} />;
 
+      const speakerRegex = /^(?:\[[\d:.,]+\]\s*)?([^:\[\]\n]{2,35}):/;
+      const speakerMatch = line.match(speakerRegex);
+      const speakerText = speakerMatch ? speakerMatch[1].trim() : null;
+
       const lineParts = line.split(TIMESTAMP_REGEX);
       const hasTimestamp = TIMESTAMP_REGEX.test(line);
-      // Reset lastIndex since we reuse the regex
       TIMESTAMP_REGEX.lastIndex = 0;
 
       const isHovered = hoveredLineIdx === lineIdx;
+      let replacedSpeaker = false;
+
+      // Find the first timestamp that appears on a line AFTER this line (for auto-stop)
+      const nextTsAfterLine = allTimestamps.find(t => t.lineIdx > lineIdx);
+      const nextTs = nextTsAfterLine?.ts;
+
+      // Build merged label options: preset labels first, then a separator, then detected (for reset)
+      const presetOptions = speakerLabels || [];
+      const resetOptions = speakerText ? Array.from(detectedSpeakers).filter(s => s !== speakerText) : [];
 
       return (
         <div
@@ -194,7 +219,7 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
                 return (
                   <span
                     key={i}
-                    onClick={() => handleTimeClick(part)}
+                    onClick={() => handleTimeClick(part, nextTs)}
                     style={{
                       color: '#818cf8',
                       cursor: 'pointer',
@@ -208,11 +233,47 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
                       transition: 'background 0.15s',
                       userSelect: 'none',
                     }}
-                    title="Click to seek audio to this time"
+                    title="Click to play this segment (auto-stops at next timestamp)"
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.28)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.12)')}
                   >
                     ▶ {part}
+                  </span>
+                );
+              }
+              if (speakerText && !replacedSpeaker && typeof part === 'string' && part.includes(`${speakerText}:`)) {
+                replacedSpeaker = true;
+                const splitIdx = part.indexOf(`${speakerText}:`) + speakerText.length;
+                const before = part.substring(0, splitIdx);
+                const after = part.substring(splitIdx);
+                const hasOptions = presetOptions.length > 0 || resetOptions.length > 0;
+                return (
+                  <span key={i}>
+                    {before}
+                    {hasOptions && (
+                      <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', marginLeft: '0.35rem', marginRight: '0.1rem', verticalAlign: 'middle', background: 'rgba(99,102,241,0.15)', borderRadius: '4px', padding: '0.1rem' }}>
+                        <ChevronDown size={14} color="#818cf8" style={{ cursor: 'pointer' }} />
+                        <select
+                          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                          value=""
+                          onChange={(e) => handleInlineReplaceSpeaker(speakerText, e.target.value)}
+                          title="Rename this speaker (replaces all occurrences)"
+                        >
+                          <option value="" disabled>Rename all "{speakerText}"...</option>
+                          {presetOptions.length > 0 && (
+                            <optgroup label="Speaker Labels">
+                              {presetOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                            </optgroup>
+                          )}
+                          {resetOptions.length > 0 && (
+                            <optgroup label="Other detected speakers">
+                              {resetOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                            </optgroup>
+                          )}
+                        </select>
+                      </div>
+                    )}
+                    {after}
                   </span>
                 );
               }
@@ -246,7 +307,7 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
               {isResubmitting ? (
                 <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resubmitting…</>
               ) : (
-                <><RotateCcw size={11} /> Resubmit</>  
+                <><RotateCcw size={11} /> Resubmit</>
               )}
             </button>
           )}
@@ -254,6 +315,7 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
       );
     });
   };
+
 
   // Scroll text area to top when part changes
   useEffect(() => {
@@ -418,6 +480,12 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
   const StatusIcon = ({ idx }: { idx: number }) => {
     const st = getPartStatus(idx);
     if (st === 'pending') return <Clock size={13} color="#475569" />;
+    
+    const part = parts.find((p) => p.chunkIndex === idx);
+    if (part && part.text.includes('**Process aborted for this part due to recitation or safety reasons**')) {
+      return <span title="Safety block detected"><AlertTriangle size={13} color="#ef4444" /></span>;
+    }
+
     if (st === 'resubmitted') return <RotateCcw size={13} color="#f59e0b" />;
     return <CheckCircle size={13} color="#10b981" />;
   };
@@ -660,32 +728,6 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
                 </div>
               </div>
 
-              {showSpeakerMapping && uniqueSpeakers.length > 0 && (
-                <div style={{
-                  background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(99,102,241,0.2)',
-                  borderRadius: '8px', padding: '1rem', marginBottom: '0.75rem',
-                  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.75rem',
-                  maxHeight: '150px', overflowY: 'auto'
-                }}>
-                  {uniqueSpeakers.map(spk => (
-                    <div key={spk} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                      <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{spk}</label>
-                      <input
-                        type="text"
-                        placeholder={`Rename ${spk}...`}
-                        value={speakerMap[spk] || ''}
-                        onChange={(e) => setSpeakerMap(prev => ({ ...prev, [spk]: e.target.value }))}
-                        style={{
-                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '6px', color: '#e2e8f0', padding: '0.4rem 0.6rem',
-                          fontSize: '0.8rem', outline: 'none'
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-
               <div style={s.row}>
                 <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                   <button
@@ -710,39 +752,11 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
                   </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  {uniqueSpeakers.length > 0 && (
-                    <button
-                      onClick={() => setShowSpeakerMapping(!showSpeakerMapping)}
-                      style={{
-                        background: showSpeakerMapping ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)',
-                        border: showSpeakerMapping ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: '8px', color: showSpeakerMapping ? '#a5b4fc' : '#cbd5e1',
-                        padding: '0.55rem 0.9rem', fontSize: '0.8rem', fontWeight: 600,
-                        cursor: 'pointer', transition: 'all 0.15s'
-                      }}
-                    >
-                      Rename Speakers ({uniqueSpeakers.length})
-                    </button>
-                  )}
                   <span style={{ fontSize: '0.73rem', color: '#475569' }}>
                     {allDone ? 'All parts transcribed' : `Waiting for ${totalChunks - parts.length} more parts…`}
                   </span>
                   <button
-                    onClick={() => {
-                        let finalParts = parts.map(p => {
-                            let newText = p.text;
-                            uniqueSpeakers.forEach(oldSpk => {
-                                const newSpk = speakerMap[oldSpk]?.trim();
-                                if (newSpk) {
-                                    const escapedOldSpk = oldSpk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                    const regex = new RegExp(`^((?:\\[[\\d:.,]+\\]\\s*)?)${escapedOldSpk}:`, 'gm');
-                                    newText = newText.replace(regex, `$1${newSpk}:`);
-                                }
-                            });
-                            return { ...p, text: newText };
-                        });
-                        onFinalize(finalParts);
-                    }}
+                    onClick={() => onFinalize(parts)}
                     disabled={parts.length === 0 || isFinalizing}
                     style={{
                       background: parts.length === 0 || isFinalizing

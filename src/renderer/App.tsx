@@ -45,6 +45,7 @@ const MainAppContent: React.FC = () => {
   const [transcriptionModel, setTranscriptionModel] = useState<string>('gemini-3.5-flash-lite');
   const [additionalInstructionsEnabled, setAdditionalInstructionsEnabled] = useState<boolean>(false);
   const [quickPrompts, setQuickPrompts] = useState<string[]>([]);
+  const [speakerLabels, setSpeakerLabels] = useState<string[]>([]);
   const [selectedQuickPrompt, setSelectedQuickPrompt] = useState<string>('Custom');
   const [additionalInstructionsText, setAdditionalInstructionsText] = useState<string>('');
   const [exampleDocxFile, setExampleDocxFile] = useState<File | null>(null);
@@ -133,20 +134,30 @@ const MainAppContent: React.FC = () => {
     }
   };
 
-  const fetchQuickPrompts = async (authToken: string) => {
+  const fetchExtraData = async (authToken: string) => {
     try {
-      const response = await fetch(`${baseUrl}/api/quick-prompts`, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Accept': 'application/json'
-        }
+      const promptsRes = await fetch(`${baseUrl}/api/quick-prompts`, {
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Accept': 'application/json' }
       });
-      const data = await response.json();
-      if (response.ok && data.prompts) {
-        setQuickPrompts(data.prompts);
+      if (promptsRes.ok) {
+        const data = await promptsRes.json();
+        setQuickPrompts(data.prompts || []);
       }
     } catch (err) {
       console.error('Failed to fetch quick prompts:', err);
+    }
+
+    // Fetch speaker labels
+    try {
+      const labelsRes = await fetch(`${baseUrl}/api/speaker-labels`, {
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Accept': 'application/json' }
+      });
+      if (labelsRes.ok) {
+        const data = await labelsRes.json();
+        setSpeakerLabels(data.labels || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch speaker labels:', err);
     }
   };
 
@@ -173,7 +184,7 @@ const MainAppContent: React.FC = () => {
           setUser(data.user);
           fetchApiKeys(storedToken);
           fetchUsageSummary(storedToken);
-          fetchQuickPrompts(storedToken);
+          fetchExtraData(storedToken);
         } else {
           localStorage.removeItem('auth_token');
         }
@@ -229,7 +240,7 @@ const MainAppContent: React.FC = () => {
     setActiveTab('converter');
     fetchApiKeys(newToken);
     fetchUsageSummary(newToken);
-    fetchQuickPrompts(newToken);
+    fetchExtraData(newToken);
   };
 
   const handleLogout = async () => {
@@ -252,6 +263,7 @@ const MainAppContent: React.FC = () => {
       setApiKeys([]);
       setUsageStats(null);
       setQuickPrompts([]);
+      setSpeakerLabels([]);
       setConversionResult(null);
       setProgress({ status: 'idle', message: '', percentage: 0 });
     }
@@ -558,6 +570,7 @@ const MainAppContent: React.FC = () => {
           onFinalize={handleFinalize}
           isFinalizing={isFinalizing}
           authToken={token}
+          speakerLabels={speakerLabels}
         />
       )}
 
