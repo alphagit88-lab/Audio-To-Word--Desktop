@@ -39,9 +39,221 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [isMinimized, setIsMinimized] = useState(false);
   const [localModel, setLocalModel] = useState(transcriptionModel);
+  const [hoveredLineIdx, setHoveredLineIdx] = useState<number | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({});
+  const [showSpeakerMapping, setShowSpeakerMapping] = useState(false);
+  const [uniqueSpeakers, setUniqueSpeakers] = useState<string[]>([]);
+
+  useEffect(() => {
+    const speakers = new Set<string>();
+    // Exclude '[' and ']' from the speaker name to prevent matching timestamp fragments if the optional group fails.
+    const regex = /^(?:\[[\d:.,]+\]\s*)?([^:\[\]\n]{2,35}):/gm;
+    parts.forEach(p => {
+      let match;
+      while ((match = regex.exec(p.text)) !== null) {
+        const speaker = match[1].trim();
+        // Ignore strings that are too long, too short, or look like URLs/file paths
+        if (speaker.length >= 2 && speaker.length < 35 && !speaker.includes('http') && !speaker.includes('\\')) {
+          speakers.add(speaker);
+        }
+      }
+    });
+    const speakerArray = Array.from(speakers);
+    setUniqueSpeakers(speakerArray);
+    setSpeakerMap(prev => {
+      const newMap = { ...prev };
+      let changed = false;
+      speakerArray.forEach(s => {
+        if (newMap[s] === undefined) {
+          newMap[s] = '';
+          changed = true;
+        }
+      });
+      return changed ? newMap : prev;
+    });
+  }, [parts]);
 
   const selectedPart = parts.find((p) => p.chunkIndex === selectedIndex);
+
+  // Timestamp format: [HH:MM:SS.mmm] or fallback [MM:SS] etc.
+  const TIMESTAMP_REGEX = /([\[\(]\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?[\]\)])/g;
+
+  const parseTimestampToSeconds = (timeStr: string): number => {
+    const clean = timeStr.replace(/[\[\]\(\),]/g, '').trim();
+    // Format: HH:MM:SS.mmm  or  MM:SS.mmm  or  MM:SS
+    const dotIdx = clean.lastIndexOf('.');
+    let msStr = '0';
+    let hmsStr = clean;
+    if (dotIdx !== -1) {
+      msStr = clean.slice(dotIdx + 1);
+      hmsStr = clean.slice(0, dotIdx);
+    }
+    const hmsParts = hmsStr.split(':').map(Number);
+    let seconds = 0;
+    if (hmsParts.length === 3) seconds = hmsParts[0] * 3600 + hmsParts[1] * 60 + hmsParts[2];
+    else if (hmsParts.length === 2) seconds = hmsParts[0] * 60 + hmsParts[1];
+    else seconds = hmsParts[0] || 0;
+    seconds += Number(`0.${msStr}`);
+    return seconds;
+  };
+
+  const handleTimeClick = (timeStr: string) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = parseTimestampToSeconds(timeStr);
+    audioRef.current.play().catch(e => console.error('Audio play failed', e));
+  };
+
+  const handlePartialResubmit = async (lineText: string, lineIdx: number, allLines: string[]) => {
+    if (!selectedPart || isResubmitting) return;
+    setIsResubmitting(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      // Find start time of this line and end time (next timestamp or end of chunk)
+      const tsMatch = lineText.match(TIMESTAMP_REGEX);
+      const startTs = tsMatch ? tsMatch[0] : null;
+      const startSec = startTs ? parseTimestampToSeconds(startTs) : 0;
+
+      // Find end time from next line that has a timestamp
+      let endSec: number | undefined;
+      for (let i = lineIdx + 1; i < allLines.length; i++) {
+        const nextMatch = allLines[i].match(TIMESTAMP_REGEX);
+        if (nextMatch) {
+          endSec = parseTimestampToSeconds(nextMatch[0]);
+          break;
+        }
+      }
+
+      // Build full chunk text with placeholder for this line
+      const fullChunkWithPlaceholder = allLines
+        .map((l, i) => i === lineIdx ? '__PARTIAL_REPLACEMENT__' : l)
+        .join('\n');
+
+      const result = await window.electronAPI.resubmitChunk(
+        selectedPart.chunkIndex,
+        selectedPart.audioChunkPaths,
+        `Re-transcribe only the segment from ${startSec.toFixed(3)}s${endSec !== undefined ? ` to ${endSec.toFixed(3)}s` : ''} of the audio. Start with the exact timestamp ${startTs || '[00:00:00.000]'}.`,
+        apiKeys,
+        localModel,
+        selectedPart.primaryAudioFilePath,
+        authToken ?? undefined,
+        lineText,
+        true,
+        fullChunkWithPlaceholder
+      );
+
+      // Splice new line into current text
+      const newLines = [...allLines];
+      newLines[lineIdx] = result.text.trim();
+      const newText = newLines.join('\n');
+      onPartUpdated(selectedPart.chunkIndex, newText, result.docxPath);
+      setResubmittedSet((prev) => new Set([...prev, selectedPart.chunkIndex]));
+      setSuccessMsg(`Paragraph at line ${lineIdx + 1} updated.`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err: any) {
+      setError('Paragraph resubmission failed. Please try again.');
+    } finally {
+      setIsResubmitting(false);
+    }
+  };
+
+  const renderTextWithTimestamps = (text: string) => {
+    const lines = text.split('\n');
+    return lines.map((line, lineIdx) => {
+      if (!line.trim()) return <div key={lineIdx} style={{ height: '0.8rem' }} />;
+
+      const lineParts = line.split(TIMESTAMP_REGEX);
+      const hasTimestamp = TIMESTAMP_REGEX.test(line);
+      // Reset lastIndex since we reuse the regex
+      TIMESTAMP_REGEX.lastIndex = 0;
+
+      const isHovered = hoveredLineIdx === lineIdx;
+
+      return (
+        <div
+          key={lineIdx}
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: '0.4rem',
+            marginBottom: '0.6rem',
+            padding: '0.25rem 0.4rem',
+            borderRadius: '6px',
+            background: isHovered ? 'rgba(99,102,241,0.06)' : 'transparent',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={() => setHoveredLineIdx(lineIdx)}
+          onMouseLeave={() => setHoveredLineIdx(null)}
+        >
+          <span style={{ flex: 1, lineHeight: 1.8 }}>
+            {lineParts.map((part, i) => {
+              if (/^[\[\(]\d{1,2}:\d{2}/.test(part)) {
+                return (
+                  <span
+                    key={i}
+                    onClick={() => handleTimeClick(part)}
+                    style={{
+                      color: '#818cf8',
+                      cursor: 'pointer',
+                      fontWeight: 700,
+                      marginRight: '0.35rem',
+                      padding: '0.1rem 0.35rem',
+                      borderRadius: '4px',
+                      background: 'rgba(99,102,241,0.12)',
+                      fontSize: '0.8rem',
+                      fontFamily: 'monospace',
+                      transition: 'background 0.15s',
+                      userSelect: 'none',
+                    }}
+                    title="Click to seek audio to this time"
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.28)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(99,102,241,0.12)')}
+                  >
+                    ▶ {part}
+                  </span>
+                );
+              }
+              return <span key={i}>{part}</span>;
+            })}
+          </span>
+          {hasTimestamp && (
+            <button
+              onClick={() => handlePartialResubmit(line, lineIdx, lines)}
+              disabled={isResubmitting}
+              style={{
+                flexShrink: 0,
+                opacity: isHovered && !isResubmitting ? 1 : 0,
+                pointerEvents: isHovered && !isResubmitting ? 'auto' : 'none',
+                transition: 'opacity 0.15s',
+                background: 'rgba(245,158,11,0.12)',
+                border: '1px solid rgba(245,158,11,0.35)',
+                borderRadius: '6px',
+                color: '#fbbf24',
+                padding: '0.2rem 0.55rem',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: isResubmitting ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                whiteSpace: 'nowrap',
+              }}
+              title="Resubmit this paragraph to AI"
+            >
+              {isResubmitting ? (
+                <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resubmitting…</>
+              ) : (
+                <><RotateCcw size={11} /> Resubmit</>  
+              )}
+            </button>
+          )}
+        </div>
+      );
+    });
+  };
 
   // Scroll text area to top when part changes
   useEffect(() => {
@@ -374,10 +586,22 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
               )}
             </div>
 
+            {/* Audio Player */}
+            {selectedPart?.audioChunkPaths?.[0] && (
+              <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(10,16,30,0.5)', flexShrink: 0 }}>
+                <audio 
+                  ref={audioRef}
+                  controls 
+                  src={`file:///${selectedPart.audioChunkPaths[0].replace(/\\/g, '/')}`} 
+                  style={{ width: '100%', height: '36px', outline: 'none' }} 
+                />
+              </div>
+            )}
+
             {/* Scrollable text */}
             <div ref={textRef} style={s.textArea}>
               {selectedPart ? (
-                selectedPart.text
+                renderTextWithTimestamps(selectedPart.text)
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#475569', marginTop: '2rem' }}>
                   <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
@@ -435,6 +659,33 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
                   </select>
                 </div>
               </div>
+
+              {showSpeakerMapping && uniqueSpeakers.length > 0 && (
+                <div style={{
+                  background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(99,102,241,0.2)',
+                  borderRadius: '8px', padding: '1rem', marginBottom: '0.75rem',
+                  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.75rem',
+                  maxHeight: '150px', overflowY: 'auto'
+                }}>
+                  {uniqueSpeakers.map(spk => (
+                    <div key={spk} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                      <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{spk}</label>
+                      <input
+                        type="text"
+                        placeholder={`Rename ${spk}...`}
+                        value={speakerMap[spk] || ''}
+                        onChange={(e) => setSpeakerMap(prev => ({ ...prev, [spk]: e.target.value }))}
+                        style={{
+                          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '6px', color: '#e2e8f0', padding: '0.4rem 0.6rem',
+                          fontSize: '0.8rem', outline: 'none'
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div style={s.row}>
                 <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                   <button
@@ -459,11 +710,39 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
                   </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  {uniqueSpeakers.length > 0 && (
+                    <button
+                      onClick={() => setShowSpeakerMapping(!showSpeakerMapping)}
+                      style={{
+                        background: showSpeakerMapping ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)',
+                        border: showSpeakerMapping ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '8px', color: showSpeakerMapping ? '#a5b4fc' : '#cbd5e1',
+                        padding: '0.55rem 0.9rem', fontSize: '0.8rem', fontWeight: 600,
+                        cursor: 'pointer', transition: 'all 0.15s'
+                      }}
+                    >
+                      Rename Speakers ({uniqueSpeakers.length})
+                    </button>
+                  )}
                   <span style={{ fontSize: '0.73rem', color: '#475569' }}>
                     {allDone ? 'All parts transcribed' : `Waiting for ${totalChunks - parts.length} more parts…`}
                   </span>
                   <button
-                    onClick={() => onFinalize(parts)}
+                    onClick={() => {
+                        let finalParts = parts.map(p => {
+                            let newText = p.text;
+                            uniqueSpeakers.forEach(oldSpk => {
+                                const newSpk = speakerMap[oldSpk]?.trim();
+                                if (newSpk) {
+                                    const escapedOldSpk = oldSpk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                    const regex = new RegExp(`^((?:\\[[\\d:.,]+\\]\\s*)?)${escapedOldSpk}:`, 'gm');
+                                    newText = newText.replace(regex, `$1${newSpk}:`);
+                                }
+                            });
+                            return { ...p, text: newText };
+                        });
+                        onFinalize(finalParts);
+                    }}
                     disabled={parts.length === 0 || isFinalizing}
                     style={{
                       background: parts.length === 0 || isFinalizing

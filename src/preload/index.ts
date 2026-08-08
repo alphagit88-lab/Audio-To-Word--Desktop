@@ -34,8 +34,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     transcriptionModel: string,
     primaryAudioFilePath: string,
     authToken?: string,
-    existingText?: string
-  ) => ipcRenderer.invoke('resubmit-chunk', chunkIndex, audioPaths, userPrompt, apiKeys, transcriptionModel, primaryAudioFilePath, authToken, existingText),
+    existingText?: string,
+    isPartial?: boolean,
+    fullChunkText?: string
+  ) => ipcRenderer.invoke('resubmit-chunk', chunkIndex, audioPaths, userPrompt, apiKeys, transcriptionModel, primaryAudioFilePath, authToken, existingText, isPartial, fullChunkText),
   finalizeTranscription: (
     parts: Array<{ chunkIndex: number; text: string }>,
     primaryAudioFilePath: string

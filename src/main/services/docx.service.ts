@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle } from 'docx';
+import { stripTimestampsForDocument } from './transcription.util';
 
 export class DocxGeneratorService {
   /**
@@ -11,7 +12,8 @@ export class DocxGeneratorService {
     const audioBaseName = path.basename(audioFilePath, path.extname(audioFilePath));
     const outputDocxPath = path.join(audioDir, `${audioBaseName}_transcription.docx`);
 
-    const paragraphs = transcribedText
+    const cleanText = stripTimestampsForDocument(transcribedText);
+    const paragraphs = cleanText
       .split('\n')
       .filter((p) => p.trim().length > 0)
       .map(
@@ -85,7 +87,8 @@ export class DocxGeneratorService {
     }
     const outputPath = path.join(sourceDir, `${baseName}_part_${partIndex + 1}.docx`);
 
-    const paragraphs = text
+    const cleanText = stripTimestampsForDocument(text);
+    const paragraphs = cleanText
       .split('\n')
       .filter((p) => p.trim().length > 0)
       .map(

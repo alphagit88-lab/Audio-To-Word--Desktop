@@ -81,7 +81,9 @@ export interface ElectronAPI {
     transcriptionModel: string,
     primaryAudioFilePath: string,
     authToken?: string,
-    existingText?: string
+    existingText?: string,
+    isPartial?: boolean,
+    fullChunkText?: string
   ) => Promise<{ text: string; docxPath: string }>;
   finalizeTranscription: (
     parts: Array<{ chunkIndex: number; text: string }>,

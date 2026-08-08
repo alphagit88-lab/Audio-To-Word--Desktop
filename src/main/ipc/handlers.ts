@@ -476,13 +476,19 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       transcriptionModel: string,
       primaryAudioFilePath: string,
       authToken?: string,
-      existingText?: string
+      existingText?: string,
+      isPartial?: boolean,
+      fullChunkText?: string
     ): Promise<{ text: string; docxPath: string }> => {
       const resolvedKeys = (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter((k) => k?.trim());
       
       let finalPrompt = userPrompt;
       if (existingText && existingText.trim().length > 0) {
-        finalPrompt = `You are correcting a previous transcription segment. Here is the ORIGINAL TRANSCRIPTION:\n"""\n${existingText}\n"""\n\nPlease rewrite or fix it according to these USER INSTRUCTIONS:\n${userPrompt}\n\nIMPORTANT: Return ONLY the corrected transcription text. Do not include introductory phrases.`;
+        if (isPartial) {
+          finalPrompt = `You are correcting a specific paragraph from a previous transcription segment. Here is the ORIGINAL PARAGRAPH:\n"""\n${existingText}\n"""\n\nPlease rewrite or fix it according to these USER INSTRUCTIONS:\n${userPrompt}\n\nIMPORTANT: Return ONLY the corrected paragraph text. Do not include introductory phrases. Ensure it starts with the exact same timestamp.`;
+        } else {
+          finalPrompt = `You are correcting a previous transcription segment. Here is the ORIGINAL TRANSCRIPTION:\n"""\n${existingText}\n"""\n\nPlease rewrite or fix it according to these USER INSTRUCTIONS:\n${userPrompt}\n\nIMPORTANT: Return ONLY the corrected transcription text. Do not include introductory phrases.`;
+        }
       }
 
       const resubmitOptions: ConversionPromptOptions = {
@@ -522,7 +528,11 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
         const audioDir = path.dirname(primaryAudioFilePath);
         const sourceDir = path.join(audioDir, 'source');
         const baseName = path.basename(primaryAudioFilePath, path.extname(primaryAudioFilePath));
-        docxPath = await docxService.generatePartDocx(sourceDir, chunkIndex, text, baseName);
+        let textToSave = text;
+        if (isPartial && fullChunkText) {
+          textToSave = fullChunkText.replace('__PARTIAL_REPLACEMENT__', text);
+        }
+        docxPath = await docxService.generatePartDocx(sourceDir, chunkIndex, textToSave, baseName);
       }
 
       return { text, docxPath };
