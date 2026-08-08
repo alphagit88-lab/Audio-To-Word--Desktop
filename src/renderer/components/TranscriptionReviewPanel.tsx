@@ -45,20 +45,27 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
   const textRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const nextTimestampRef = useRef<number | null>(null);
+  const timeUpdateHandlerRef = useRef<(() => void) | null>(null);
 
-  // Auto-stop audio when it reaches the next timestamp
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onTimeUpdate = () => {
-      if (nextTimestampRef.current !== null && audio.currentTime >= nextTimestampRef.current) {
-        audio.pause();
-        nextTimestampRef.current = null;
-      }
-    };
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    return () => audio.removeEventListener('timeupdate', onTimeUpdate);
-  }, [selectedIndex]);
+  // Callback ref: attaches the timeupdate listener exactly when the audio element mounts
+  const setAudioRef = React.useCallback((el: HTMLAudioElement | null) => {
+    // Detach from previous element
+    if (audioRef.current && timeUpdateHandlerRef.current) {
+      audioRef.current.removeEventListener('timeupdate', timeUpdateHandlerRef.current);
+      timeUpdateHandlerRef.current = null;
+    }
+    (audioRef as React.MutableRefObject<HTMLAudioElement | null>).current = el;
+    if (el) {
+      const handler = () => {
+        if (nextTimestampRef.current !== null && el.currentTime >= nextTimestampRef.current) {
+          el.pause();
+          nextTimestampRef.current = null;
+        }
+      };
+      timeUpdateHandlerRef.current = handler;
+      el.addEventListener('timeupdate', handler);
+    }
+  }, []);
 
   const selectedPart = parts.find((p) => p.chunkIndex === selectedIndex);
 
@@ -189,10 +196,6 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
       const isHovered = hoveredLineIdx === lineIdx;
       let replacedSpeaker = false;
 
-      // Find the first timestamp that appears on a line AFTER this line (for auto-stop)
-      const nextTsAfterLine = allTimestamps.find(t => t.lineIdx > lineIdx);
-      const nextTs = nextTsAfterLine?.ts;
-
       // Build merged label options: preset labels first, then a separator, then detected (for reset)
       const presetOptions = speakerLabels || [];
       const resetOptions = speakerText ? Array.from(detectedSpeakers).filter(s => s !== speakerText) : [];
@@ -216,6 +219,10 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
           <span style={{ flex: 1, lineHeight: 1.8 }}>
             {lineParts.map((part, i) => {
               if (/^[\[\(]\d{1,2}:\d{2}/.test(part)) {
+                // Find this exact timestamp in the flattened list to get the next one
+                const tsIndex = allTimestamps.findIndex(t => t.lineIdx === lineIdx && t.ts === part);
+                const nextTs = tsIndex >= 0 && tsIndex + 1 < allTimestamps.length ? allTimestamps[tsIndex + 1].ts : undefined;
+
                 return (
                   <span
                     key={i}
@@ -658,7 +665,7 @@ export const TranscriptionReviewPanel: React.FC<Props> = ({
             {selectedPart?.audioChunkPaths?.[0] && (
               <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(10,16,30,0.5)', flexShrink: 0 }}>
                 <audio 
-                  ref={audioRef}
+                  ref={setAudioRef}
                   controls 
                   src={`file:///${selectedPart.audioChunkPaths[0].replace(/\\/g, '/')}`} 
                   style={{ width: '100%', height: '36px', outline: 'none' }} 
